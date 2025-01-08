@@ -1,0 +1,295 @@
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import StreamingResponse
+
+import uuid
+import pandas as pd
+import io
+from nlp.process_texts import process_texts
+from quality_checks.quality_check import quality_check
+from fastapi.middleware.cors import CORSMiddleware
+from link_service.linking_service import link_rows
+import asyncio
+import sqlite3
+import logging
+
+from fastapi import BackgroundTasks, HTTPException
+
+app = FastAPI()
+
+# Add CORS for Streamlit frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Initialize SQLite database
+def init_db():
+    conn = sqlite3.connect("pipeline_status.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pipeline_status (
+            task_id TEXT PRIMARY KEY,
+            step TEXT,
+            progress INTEGER,
+            result TEXT
+        )
+    """
+    )
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def update_status(task_id: str, step: str, progress: int, result: str = None):
+    """
+    Update the pipeline status in the database.
+    """
+    conn = sqlite3.connect("pipeline_status.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO pipeline_status (task_id, step, progress, result)
+        VALUES (?, ?, ?, ?)
+    """,
+        (task_id, step, progress, result),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_status_from_db(task_id: str):
+    """
+    Retrieve the pipeline status from the database.
+    """
+    conn = sqlite3.connect("pipeline_status.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT step, progress, result FROM pipeline_status WHERE task_id = ?",
+        (task_id,),
+    )
+    status = cursor.fetchone()
+    conn.close()
+    return (
+        {"step": status[0], "progress": status[1], "result": status[2]}
+        if status
+        else None
+    )
+
+
+# Example: define a placeholder for DB interactions
+def store_step_output(task_id: str, step_name: str, data: pd.DataFrame):
+    """
+    Save data to the database after each pipeline step.
+    """
+    # Insert into DB here. For example:
+    # db.insert(table="pipeline_results", dict={"task_id": task_id, "step_name": step_name, "data": data_json})
+    conn = sqlite3.connect("pipeline_status.db")
+    data.to_sql(f"{task_id}_{step_name}", conn, if_exists="replace")
+
+
+@app.get("/results/{task_id}/{step_name}")
+def get_step_results_as_excel(task_id: str, step_name: str):
+    """
+    Fetch pipeline step data from the database and return as an Excel file.
+    """
+    try:
+        conn = sqlite3.connect("pipeline_status.db")
+        query = f'SELECT * FROM "{task_id}_{step_name}"'
+        df = pd.read_sql(query, conn)
+
+        if df.empty:
+            raise HTTPException(
+                status_code=404, detail="No data found for the specified task and step."
+            )
+
+        # Write the DataFrame to an Excel file in memory
+        excel_data = io.BytesIO()
+        with pd.ExcelWriter(excel_data, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Results")
+        excel_data.seek(0)
+
+        # Return the Excel file as a streaming response
+        return StreamingResponse(
+            excel_data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{task_id}_{step_name}.xlsx"'
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
+    task_logger = get_task_logger(task_id)
+
+    try:
+        update_status(task_id, "Initializing", 0)
+        task_logger.info("Pipeline initialization started.")
+
+        # Step 1: Load data
+        update_status(task_id, "Loading data", 10)
+        task_logger.info("Loading data from uploaded files.")
+        excel_data = pd.read_excel(io.BytesIO(data_file))
+        free_texts = text_file.decode("utf-8").splitlines()
+
+        await asyncio.sleep(1)  # Simulate processing
+
+        # Step 2: Process free texts
+        update_status(task_id, "Processing free texts", 30)
+        task_logger.info("Processing free texts and structuring data.")
+        structured_data = process_texts(free_texts, excel_data)
+        store_step_output(task_id, "processed_texts", structured_data)
+
+        await asyncio.sleep(1)
+
+        # Step 3: Link rows
+        update_status(task_id, "Linking rows", 60)
+        task_logger.info("Linking rows based on criteria.")
+        linked_data = link_rows(structured_data, linking_criteria={"by_date": True})
+        store_step_output(task_id, "linked_data", linked_data)
+
+        await asyncio.sleep(1)
+
+        # Step 4: Data quality check
+        update_status(task_id, "Performing data quality checks", 90)
+        task_logger.info("Performing data quality checks.")
+        final_data, quality_report = quality_check(linked_data)
+        store_step_output(task_id, "quality_check", final_data)
+
+        # Save result (simulate)
+        update_status(
+            task_id, "Completed", 100, result="Pipeline completed successfully!"
+        )
+        task_logger.info("Pipeline completed successfully.")
+    except Exception as e:
+        update_status(task_id, "Failed", 100, result=str(e))
+        task_logger.error(f"Pipeline failed with error: {e}")
+        raise
+
+
+@app.post("/pipeline")
+async def start_pipeline(
+    data_file: UploadFile = File(...),
+    text_file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    task_id = str(uuid.uuid4())
+    data_content = await data_file.read()
+    text_content = await text_file.read()
+
+    # Start the pipeline in the background
+    background_tasks.add_task(run_pipeline_task, task_id, data_content, text_content)
+
+    return {
+        "task_id": task_id,
+        "message": "Pipeline started! Use this task_id to check the status later.",
+    }
+
+
+@app.get("/status/{task_id}")
+async def get_status(task_id: str):
+    status = get_status_from_db(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Task ID not found.")
+    return status
+
+
+@app.get("/logs/{task_id}")
+async def get_logs(task_id: str):
+    """
+    Retrieve logs for a specific task.
+    """
+    conn = sqlite3.connect("pipeline_status.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT timestamp, log_level, message
+        FROM pipeline_logs
+        WHERE task_id = ?
+        ORDER BY timestamp
+    """,
+        (task_id,),
+    )
+    logs = [
+        {"timestamp": row[0], "level": row[1], "message": row[2]}
+        for row in cursor.fetchall()
+    ]
+    conn.close()
+
+    if not logs:
+        raise HTTPException(
+            status_code=404, detail="No logs found for the specified task."
+        )
+    return {"task_id": task_id, "logs": logs}
+
+
+# Initialize SQLite database for logs
+def init_logs_db():
+    conn = sqlite3.connect("pipeline_status.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pipeline_logs (
+            task_id TEXT,
+            timestamp TEXT,
+            log_level TEXT,
+            message TEXT,
+            FOREIGN KEY (task_id) REFERENCES pipeline_status (task_id)
+        )
+    """
+    )
+    conn.commit()
+    conn.close()
+
+
+init_logs_db()
+
+
+def log_message(task_id: str, log_level: str, message: str):
+    """
+    Save a log message to the database.
+    """
+    conn = sqlite3.connect("pipeline_status.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO pipeline_logs (task_id, timestamp, log_level, message)
+        VALUES (?, datetime('now'), ?, ?)
+    """,
+        (task_id, log_level, message),
+    )
+    conn.commit()
+    conn.close()
+
+
+# Configure standard Python logger
+logger = logging.getLogger("pipeline")
+logger.setLevel(logging.DEBUG)
+
+
+# Log handler to save logs to the database
+class DBLogHandler(logging.Handler):
+    def __init__(self, task_id: str):
+        super().__init__()
+        self.task_id = task_id
+
+    def emit(self, record):
+        log_message(self.task_id, record.levelname, record.msg)
+
+
+# Example: Add DBLogHandler to logger dynamically
+def get_task_logger(task_id: str):
+    task_logger = logging.getLogger(f"pipeline_{task_id}")
+    task_logger.setLevel(logging.DEBUG)
+    task_logger.addHandler(DBLogHandler(task_id))
+    return task_logger

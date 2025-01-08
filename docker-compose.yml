@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./api
+    container_name: api
+    ports:
+      - "8000:8000"  # Expose API port
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./status_web
+    container_name: streamlit
+    ports:
+      - "8501:8501"  # Expose Streamlit port
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+
+volumes:
+  api-data:
