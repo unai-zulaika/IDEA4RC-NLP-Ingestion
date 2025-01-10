@@ -7,3 +7,4 @@ requests==2.31.0
 python-multipart==0.0.20
 numpy==1.26.1
 transformers==4.35.2
+torch==2.1.2
