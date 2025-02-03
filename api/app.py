@@ -1,18 +1,16 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import StreamingResponse
-
-import uuid
-import pandas as pd
+import asyncio
 import io
+import logging
+import sqlite3
+import uuid
+
+import pandas as pd
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from link_service.linking_service import link_rows
 from nlp.process_texts import process_texts
 from quality_checks.quality_check import quality_check
-from fastapi.middleware.cors import CORSMiddleware
-from link_service.linking_service import link_rows
-import asyncio
-import sqlite3
-import logging
-
-from fastapi import BackgroundTasks, HTTPException
 
 app = FastAPI()
 
@@ -26,8 +24,8 @@ app.add_middleware(
 )
 
 
-# Initialize SQLite database
 def init_db():
+    """Initialize SQLite database for pipeline status."""
     conn = sqlite3.connect("pipeline_status.db")
     cursor = conn.cursor()
     cursor.execute(
@@ -47,7 +45,7 @@ def init_db():
 init_db()
 
 
-def update_status(task_id: str, step: str, progress: int, result: str = None):
+def update_status(task_id: str, step: str, progress: int, result: str = ""):
     """
     Update the pipeline status in the database.
     """
@@ -90,8 +88,9 @@ def store_step_output(task_id: str, step_name: str, data: pd.DataFrame):
     """
     # Insert into DB here. For example:
     # db.insert(table="pipeline_results", dict={"task_id": task_id, "step_name": step_name, "data": data_json})
-    conn = sqlite3.connect("pipeline_status.db")
-    data.to_sql(f"{task_id}_{step_name}", conn, if_exists="replace")
+    conn: sqlite3.Connection = sqlite3.connect("pipeline_status.db")
+    data.to_sql(f"{task_id}_{step_name}", con=conn, if_exists="replace", index=False)  # type: ignore
+    conn.close()
 
 
 @app.get("/results/{task_id}/{step_name}")
@@ -99,10 +98,11 @@ def get_step_results_as_excel(task_id: str, step_name: str):
     """
     Fetch pipeline step data from the database and return as an Excel file.
     """
+    conn = None
     try:
         conn = sqlite3.connect("pipeline_status.db")
         query = f'SELECT * FROM "{task_id}_{step_name}"'
-        df = pd.read_sql(query, conn)
+        df: pd.DataFrame = pd.read_sql(query, conn)  # type: ignore
 
         if df.empty:
             raise HTTPException(
@@ -112,7 +112,7 @@ def get_step_results_as_excel(task_id: str, step_name: str):
         # Write the DataFrame to an Excel file in memory
         excel_data = io.BytesIO()
         with pd.ExcelWriter(excel_data, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Results")
+            df.to_excel(writer, index=False, sheet_name="Results")  # type: ignore
         excel_data.seek(0)
 
         # Return the Excel file as a streaming response
@@ -124,12 +124,20 @@ def get_step_results_as_excel(task_id: str, step_name: str):
             },
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
+    """Function to run the pipeline task asynchronously.
+
+    Args:
+        task_id (str): _description_
+        data_file (bytes): _description_
+        text_file (bytes): _description_
+    """
     task_logger = get_task_logger(task_id)
 
     try:
@@ -139,7 +147,7 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         # Step 1: Load data
         update_status(task_id, "Loading data", 10)
         task_logger.info("Loading data from uploaded files.")
-        excel_data = pd.read_excel(io.BytesIO(data_file))
+        excel_data: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))  # type: ignore
         free_texts = text_file.decode("utf-8").splitlines()
 
         await asyncio.sleep(1)  # Simulate processing
@@ -173,7 +181,7 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         task_logger.info("Pipeline completed successfully.")
     except Exception as e:
         update_status(task_id, "Failed", 100, result=str(e))
-        task_logger.error(f"Pipeline failed with error: {e}")
+        task_logger.error("Pipeline failed with error: %s", e)
         raise
 
 
@@ -183,6 +191,7 @@ async def start_pipeline(
     text_file: UploadFile = File(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
+    """Starts the pipeline"""
     task_id = str(uuid.uuid4())
     data_content = await data_file.read()
     text_content = await text_file.read()
@@ -198,6 +207,7 @@ async def start_pipeline(
 
 @app.get("/status/{task_id}")
 async def get_status(task_id: str):
+    """Provides the status of a task given its id"""
     status = get_status_from_db(task_id)
     if not status:
         raise HTTPException(status_code=404, detail="Task ID not found.")

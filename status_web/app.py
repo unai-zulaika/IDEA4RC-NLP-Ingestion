@@ -1,12 +1,13 @@
 import streamlit as st
 import requests
-import io
 
 st.title("IDEA4RC Data Ingestion")
 
 st.write(
     "*Upload the normalized table and the free texts, then click on 'Start pipeline' to start the process.*"
 )
+
+mode = "localhost"
 
 # Initialize session state
 if "task_id" not in st.session_state:
@@ -32,7 +33,7 @@ if uploaded_excel and uploaded_text:
             "text_file": ("data.txt", uploaded_text.getvalue(), "text/plain"),
         }
         # Start the pipeline
-        response = requests.post("http://backend:8000/pipeline", files=files)
+        response = requests.post(f"http://{mode}:8000/pipeline", files=files)
         if response.status_code == 200:
             st.session_state.task_id = response.json()["task_id"]
             st.success(f"Pipeline started! Task ID: {st.session_state.task_id}")
@@ -48,7 +49,7 @@ task_id_input = st.text_input("Enter Task ID to check status:")
 
 if st.button("Check Status"):
     if task_id_input:
-        response = requests.get(f"http://backend:8000/status/{task_id_input}")
+        response = requests.get(f"http://{mode}:8000/status/{task_id_input}")
         if response.status_code == 200:
             status = response.json()
             st.write(f"Step: {status['step']}")
@@ -57,7 +58,7 @@ if st.button("Check Status"):
                 st.write(f"Result: {status['result']}")
 
             response_data_1 = requests.get(
-                f"http://backend:8000/results/{task_id_input}/processed_texts"
+                f"http://{mode}:8000/results/{task_id_input}/processed_texts"
             )
             if response_data_1.status_code == 200:
                 # Provide the file content for download
@@ -73,7 +74,7 @@ if st.button("Check Status"):
                 )
 
             response_data_2 = requests.get(
-                f"http://backend:8000/results/{task_id_input}/linked_data"
+                f"http://{mode}:8000/results/{task_id_input}/linked_data"
             )
             if response_data_2.status_code == 200:
                 # Provide the file content for download
@@ -89,7 +90,7 @@ if st.button("Check Status"):
                 )
 
             response_data_3 = requests.get(
-                f"http://backend:8000/results/{task_id_input}/quality_check"
+                f"http://{mode}:8000/results/{task_id_input}/quality_check"
             )
             if response_data_3.status_code == 200:
                 # Provide the file content for download
@@ -119,7 +120,7 @@ task_id_logs = st.text_input("Enter Task ID to view logs:")
 
 if st.button("Fetch Logs"):
     if task_id_logs:
-        response = requests.get(f"http://backend:8000/logs/{task_id_logs}")
+        response = requests.get(f"http://{mode}:8000/logs/{task_id_logs}")
         if response.status_code == 200:
             logs = response.json()["logs"]
             st.write("### Logs:")

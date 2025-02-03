@@ -1,0 +1,5 @@
+{
+    "Patient.bmi": "Patient's BMI is (\\d+\\.?\\d*)",
+    "Patient.diagnosis": "The diagnosis was ([a-zA-Z]+)",
+    "Patient.medication": "The prescribed medication is ([a-zA-Z]+)"
+}
