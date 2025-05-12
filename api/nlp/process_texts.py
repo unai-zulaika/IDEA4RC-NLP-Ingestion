@@ -23,6 +23,7 @@ def process_texts(texts: list[str], excel_data: pandas.DataFrame) -> pandas.Data
     output: str = """
     Patient's BMI is 23.5. The diagnosis was Hypertension. The prescribed medication is Lisinopril.
     """
+    patient_id = 3 # this should come from the texts
 
     # we load dictionary for LLM output
     # Get the absolute path of the current script
@@ -45,12 +46,25 @@ def process_texts(texts: list[str], excel_data: pandas.DataFrame) -> pandas.Data
         if matches:
             identified_values[variable_name] = matches
 
-    # now add them to the excel_data
+    # Ensure DataFrame has the expected structure before appending
+    if excel_data.empty:
+        excel_data = pd.DataFrame(columns=["core_variable", "value"])
+
+    # Append rows safely
     for variable_name, values in identified_values.items():
         for value in values:
-            excel_data.loc[len(excel_data)] = {
+            row = {
                 "core_variable": variable_name,
                 "value": value,
+                "patient_id": patient_id,
+                "original_source": "NLP",
+                # types must be solved.
+                # date must be solved
             }
+            # Fill in any missing columns explicitly
+            for col in excel_data.columns:
+                if col not in row:
+                    row[col] = None
+            excel_data.loc[len(excel_data)] = row
 
     return excel_data
