@@ -148,7 +148,8 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         update_status(task_id, "Loading data", 10)
         task_logger.info("Loading data from uploaded files.")
         excel_data: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))  # type: ignore
-        free_texts = text_file.decode("utf-8").splitlines()
+        free_texts: pd.DataFrame = pd.read_excel(io.BytesIO(text_file))  # type: ignore
+        # free_texts = text_file.decode("utf-8").splitlines()
 
         await asyncio.sleep(1)  # Simulate processing
 

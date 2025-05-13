@@ -15,10 +15,10 @@ if "task_id" not in st.session_state:
 
 # File upload section
 uploaded_excel = st.file_uploader(
-    "Upload an Excel file", type=["xlsx"], key="excel_uploader"
+    "Upload an Excel file with the structured data", type=["xlsx"], key="excel_uploader"
 )
 uploaded_text = st.file_uploader(
-    "Upload a text file", type=["txt"], key="text_uploader"
+    "Upload an Excel file with the patients text", type=["xlsx"], key="text_uploader"
 )
 
 if uploaded_excel and uploaded_text:
@@ -30,7 +30,9 @@ if uploaded_excel and uploaded_text:
                 uploaded_excel.getvalue(),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ),
-            "text_file": ("data.txt", uploaded_text.getvalue(), "text/plain"),
+            "text_file": ("text.xlsx",
+                uploaded_text.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",),
         }
         # Start the pipeline
         response = requests.post(f"http://{mode}:8000/pipeline", files=files)

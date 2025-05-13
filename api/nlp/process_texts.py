@@ -7,17 +7,18 @@ from pathlib import Path
 import json
 
 
-def process_texts(texts: list[str], excel_data: pandas.DataFrame) -> pandas.DataFrame:
+def process_texts(texts: pandas.DataFrame, excel_data: pandas.DataFrame) -> pandas.DataFrame:
     """
     Function to process texts and extract structured data from them
 
     Args:
-    - texts (list): List of texts to process
+    - texts (pandas.DataFrame): List of texts to process
     - excel_data (pandas.DataFrame): Excel data to integrate structured data into
 
     return:
     - excel_data (pandas.DataFrame): Excel data with structured data integrated
     """
+
     # Initialize an NLP model (e.g., Named Entity Recognition)
     # nlp = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
     output: str = """
@@ -41,10 +42,18 @@ def process_texts(texts: list[str], excel_data: pandas.DataFrame) -> pandas.Data
     identified_values: dict["str", list["str"]] = (
         {}
     )  # we can find a list of values for each variable
-    for variable_name, pattern in patterns.items():
-        matches: list[str] = re.findall(pattern, output)
-        if matches:
-            identified_values[variable_name] = matches
+    # Example regex patterns
+    # loop texts dataframe
+    for index, row in texts.iterrows():
+        for variable_name, pattern in patterns.items():
+            matches: list[str] = re.findall(pattern, row["text"])
+            if matches:
+                identified_values[variable_name] = matches
+
+    # for variable_name, pattern in patterns.items():
+    #     matches: list[str] = re.findall(pattern, output)
+    #     if matches:
+    #         identified_values[variable_name] = matches
 
     # Ensure DataFrame has the expected structure before appending
     if excel_data.empty:
