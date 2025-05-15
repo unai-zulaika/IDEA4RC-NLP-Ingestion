@@ -3,6 +3,8 @@ import requests
 
 st.title("IDEA4RC Data Ingestion")
 
+st.title("_OPTION 1_ :blue[Full process]")
+
 st.write(
     "*Upload the normalized table and the free texts, then click on 'Start pipeline' to start the process.*"
 )
@@ -42,6 +44,40 @@ if uploaded_excel and uploaded_text:
             st.info("Save this Task ID to check the status later.")
         else:
             st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+
+#### ONLY QUALITY CHECKS
+
+st.divider()
+st.title("_OPTION 2_ :blue[Just quality check]")
+
+st.write("### Run Quality Check on a File")
+
+uploaded_qc_file = st.file_uploader(
+    "Upload a file to run quality check", type=["xlsx"], key="qc_file_uploader"
+)
+
+if uploaded_qc_file and st.button("Execute Quality Check"):
+    files = {
+        "file": (
+            uploaded_qc_file.name,
+            uploaded_qc_file.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    response = requests.post(f"http://{mode}:8000/results/quality_check", files=files)
+
+    if response.status_code == 200:
+        st.success("Quality check completed successfully. Download result below:")
+        st.download_button(
+            label="Download Quality Check Result",
+            data=response.content,
+            file_name=f"quality_check_result.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+
+#### PIPELINE STATUS
 
 st.divider()
 

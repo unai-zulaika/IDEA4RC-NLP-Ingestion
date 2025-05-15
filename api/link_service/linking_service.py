@@ -1,4 +1,5 @@
 import pandas as pd
+import json
 
 
 def link_rows(data: pd.DataFrame, linking_criteria: dict = None) -> pd.DataFrame:
@@ -13,16 +14,20 @@ def link_rows(data: pd.DataFrame, linking_criteria: dict = None) -> pd.DataFrame
     Returns:
         pd.DataFrame: Data with the 'linked_to' column filled.
     """
+
+    entity_mappings = {
+    }
+
+    # load from JSON file
+    with open("entity_mappings.json", "r") as file:
+        entity_mappings = json.load(file)
+
     # Ensure required columns are present
     if "record_id" not in data.columns or "patient_id" not in data.columns:
         raise ValueError("Data must contain 'record_id' and 'patient_id' columns.")
 
     # first thing filter empty values for value column
     data = data.dropna(subset=["value"])  # do we want to delete?
-
-    # Ensure required columns are present
-    if "record_id" not in data.columns or "patient_id" not in data.columns:
-        raise ValueError("Data must contain 'record_id' and 'patient_id' columns.")
 
     # Create a mapping for records grouped by patient_id
     record_groups = data.groupby("patient_id")["record_id"].apply(list).to_dict()

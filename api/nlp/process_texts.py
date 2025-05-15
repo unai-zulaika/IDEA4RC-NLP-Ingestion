@@ -42,13 +42,18 @@ def process_texts(texts: pandas.DataFrame, excel_data: pandas.DataFrame) -> pand
     identified_values: dict["str", list["str"]] = (
         {}
     )  # we can find a list of values for each variable
+    dates = []
     # Example regex patterns
     # loop texts dataframe
     for index, row in texts.iterrows():
         for variable_name, pattern in patterns.items():
+            print(pattern)
             matches: list[str] = re.findall(pattern, row["text"])
             if matches:
                 identified_values[variable_name] = matches
+                # if "date" column is not empty, we can add it to the dates list
+                if row["date"] != "":
+                    dates.append(row["date"])
 
     # for variable_name, pattern in patterns.items():
     #     matches: list[str] = re.findall(pattern, output)
@@ -60,16 +65,19 @@ def process_texts(texts: pandas.DataFrame, excel_data: pandas.DataFrame) -> pand
         excel_data = pd.DataFrame(columns=["core_variable", "value"])
 
     # Append rows safely
+    z = 0
     for variable_name, values in identified_values.items():
-        for value in values:
+        for i, value in enumerate(values):
             row = {
                 "core_variable": variable_name,
                 "value": value,
                 "patient_id": patient_id,
                 "original_source": "NLP",
+                "date_ref": dates[z],  # Placeholder for date
                 # types must be solved.
                 # date must be solved
             }
+            z += 1
             # Fill in any missing columns explicitly
             for col in excel_data.columns:
                 if col not in row:
