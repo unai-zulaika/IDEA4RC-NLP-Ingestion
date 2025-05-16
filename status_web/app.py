@@ -131,21 +131,37 @@ if st.button("Check Status"):
                 f"http://{mode}:8000/results/{task_id_input}/quality_check"
             )
             if response_data_3.status_code == 200:
-                # Provide the file content for download
                 st.download_button(
                     label="Download Excel step 3",
                     data=response_data_3.content,
                     file_name=f"{task_id_input}_quality_check.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+
+                # Upload option if pipeline is completed
+                if status["step"] == "Completed":
+                    st.write("✅ Pipeline finished. You can now upload the final file.")
+                    if st.button("Send Final File to Upload Endpoint"):
+                        try:
+                            # Use an in-memory bytes object from response content
+                            files = {
+                                'dataFile': (
+                                    f'{task_id_input}_quality_check.xlsx',
+                                    response_data_3.content,
+                                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                                )
+                            }
+                            upload_response = requests.post("http://localhost:4001/etl/upload", files=files)
+                            if upload_response.status_code == 200:
+                                st.success("Final file successfully uploaded!")
+                            else:
+                                st.error(f"Upload failed with status code {upload_response.status_code}")
+                        except Exception as e:
+                            st.error(f"Upload failed: {e}")
             else:
                 st.error(
                     f"Error fetching file 3: {response.json().get('detail', 'Unknown error')}"
                 )
-        else:
-            st.error(
-                f"Error fetching file: {response.json().get('detail', 'Unknown error')}"
-            )
 
     else:
         st.warning("Please enter a valid Task ID.")

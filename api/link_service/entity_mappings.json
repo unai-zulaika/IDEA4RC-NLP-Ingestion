@@ -1,11 +1,25 @@
 {
-    "PatientFollowUp": "Patient",
-    "CancerEpisode": "Patient",
-    "Diagnosis": "CancerEpisode",
-    "ClinicalStage": "Diagnosis",
-    "PathologicalStage": "Diagnosis",
-    "EpisodeEvent": "CancerEpisode",
-    "DiseaseExtent": "EpisodeEvent",
+    "PatientFollowUp": [
+        "Patient"
+    ],
+    "CancerEpisode": [
+        "Patient"
+    ],
+    "Diagnosis": [
+        "CancerEpisode"
+    ],
+    "ClinicalStage": [
+        "Diagnosis"
+    ],
+    "PathologicalStage": [
+        "Diagnosis"
+    ],
+    "EpisodeEvent": [
+        "CancerEpisode"
+    ],
+    "DiseaseExtent": [
+        "EpisodeEvent"
+    ],
     "GeneticTestExpression": [
         "EpisodeEvent",
         "Diagnosis"

@@ -12,6 +12,7 @@ from link_service.linking_service import link_rows
 from nlp.process_texts import process_texts
 from quality_checks.quality_check import quality_check
 
+
 app = FastAPI()
 
 # Add CORS for Streamlit frontend
@@ -164,7 +165,9 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         # Step 3: Link rows
         update_status(task_id, "Linking rows", 60)
         task_logger.info("Linking rows based on criteria.")
-        linked_data = link_rows(structured_data, linking_criteria={"by_date": True})
+        # linked_data = link_rows(structured_data, linking_criteria={"by_date": True})
+        linked_data = link_rows(structured_data)
+
         store_step_output(task_id, "linked_data", linked_data)
 
         await asyncio.sleep(1)

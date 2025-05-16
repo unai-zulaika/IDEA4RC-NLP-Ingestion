@@ -1,11 +1,24 @@
-## Capsule Workbench
-name: capsule-nlp-ingestion
-namespace: datamesh
-replicas: 1
-image: ghcr.io/idea4rc/capsule-workbench@sha256:5de9ca7610fd4497b26ebef08a82e6b42545303ffc81fa4dccc5bbfcfa4a9f86
-port: 80
-service:
-  name: nlp-ingestion-svc
-  port: 80
-  targetPort: 80
-  type: ClusterIP
+# ## Capsule Workbench
+# name: capsule-nlp-ingestion
+# namespace: datamesh
+# replicas: 1
+# image: ghcr.io/idea4rc/capsule-workbench@sha256:5de9ca7610fd4497b26ebef08a82e6b42545303ffc81fa4dccc5bbfcfa4a9f86
+# port: 80
+# service:
+#   name: nlp-ingestion-svc
+#   port: 80
+#   targetPort: 80
+#   type: ClusterIP
+
+###
+nlp-ingestion:
+  namespace: datamesh
+  status-web:
+    name: status-web
+    image: ghcr.io/idea4rc/etl:1.0
+    port: 8501
+
+  api:
+    name: api
+    image: ghcr.io/unai-zulaika/idea4rc-nlp-ingestion-api:0.1
+    port: 8000
