@@ -1,12 +1,40 @@
 import streamlit as st
 import requests
 
+st.set_page_config(page_title='IDEA4RC data ingestion', page_icon="LogoIDEA4RC-300x200.jpg", layout="wide")
+# st.set_page_config(page_title='IDEA4RC data ingestion', page_icon=favicon) # , page_icon = favicon, layout = 'wide', initial_sidebar_state = 'auto')
+
 st.title("IDEA4RC Data Ingestion")
+
+st.write(
+    """
+    In this application you can find different options to run the data ingestion pipeline for the IDEA4RC project.\n
+    The pipeline consists of three main steps:\n
+    1. **Text Processing**: Extracts and processes free text data from patient records.\n
+    2. **Data Linking**: Links the processed text data with structured data from the database.\n
+    3. **Quality Checks**: Performs quality checks on the linked data to ensure accuracy and completeness.\n
+    You can run the full pipeline or individual steps as needed.\n
+    The pipeline is designed to be flexible and can handle various data formats and structures.\n
+    Please select one of the options below to start the process.
+
+    If you are in Point of Injection 1, please use the _OPTION 1_ below.\n
+    If you are in Point of Injection 2, please use the _OPTION 2_ or _OPTION 3_ below (depending on your needs).\n
+
+    You can also run the ETL process directly using _OPTION 4_ if you have already processed the data and just need to upload it.\n
+    """
+)
 
 st.title("_OPTION 1_ :blue[Full process]")
 
 st.write(
-    "*Upload the normalized table and the free texts, then click on 'Start pipeline' to start the process.*"
+    """
+    _Upload the normalized table and the free texts, then click on 'Start pipeline' to start the process._\n
+    This option will run the full pipeline, including text processing, data linking, and quality checks.\n
+    You can check the status of the pipeline and download the results at any time.\n 
+    If you want to run only the quality checks, please use the option below.\n
+    If you want to run only the ETL, please use the option below.\n
+    THIS IS THE RECOMMENDED OPTION FOR Point of Injection 1.
+    """
 )
 
 mode = "localhost"
@@ -45,10 +73,44 @@ if uploaded_excel and uploaded_text:
         else:
             st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
+
+#### ONLY FROM LINKING ONWARDS
+
+st.divider()
+st.title("_OPTION 2_ :blue[Run the linking service]")
+
+st.write("### Run the linking service on a File")
+uploaded_linking_file = st.file_uploader(
+    "Upload a file to run the linking service", type=["xlsx"], key="linking_file_uploader"
+)
+
+if uploaded_linking_file and st.button("Execute Linking Service"):
+    files = {
+        "file": (
+            uploaded_linking_file.name,
+            uploaded_linking_file.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    response = requests.post(f"http://{mode}:8000/results/linking_service", files=files)
+
+    if response.status_code == 200:
+        st.success("Linking service completed successfully. Download result below:")
+        st.download_button(
+            label="Download Linking Service Result",
+            data=response.content,
+            file_name=f"linking_service_result.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+
+
+
 #### ONLY QUALITY CHECKS
 
 st.divider()
-st.title("_OPTION 2_ :blue[Just quality check]")
+st.title("_OPTION 3_ :blue[Just quality checks]")
 
 st.write("### Run Quality Check on a File")
 
@@ -64,6 +126,67 @@ if uploaded_qc_file and st.button("Execute Quality Check"):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     }
+    response = requests.post(f"http://{mode}:8000/results/quality_check", files=files)
+
+    if response.status_code == 200:
+        st.success("Quality check completed successfully. Download result below:")
+        st.download_button(
+            label="Download Quality Check Result",
+            data=response.content,
+            file_name=f"quality_check_result.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+
+#### SEE data quality
+
+# Initialize state only once
+if "data_quality_report" not in st.session_state:
+    st.session_state.data_quality_report = False
+
+# Button to toggle visibility
+if st.button("See Data Quality Report"):
+    st.session_state.data_quality_report = not st.session_state.data_quality_report
+
+# Show report if toggled
+if st.session_state.data_quality_report:
+    st.markdown("## Data Report")
+    st.components.v1.html(
+        """
+        <iframe src="http://localhost:5173/" width="100%" height="1000" style="border:none;"></iframe>
+        """,
+        height=1000
+    )
+
+#### SKIP ALL STEPS AND RUN ETL
+
+st.divider()
+st.title("_OPTION 4_ :blue[Run ETL]")
+
+st.write("### Run ETL on a File")
+
+uploaded_etl_file = st.file_uploader(
+    "Upload a file to run ETL", type=["xlsx"], key="etl_file_uploader"
+)
+
+if uploaded_etl_file and st.button("Execute ETL"):
+    files = {
+        "dataFile": (
+            uploaded_etl_file.name,
+            uploaded_etl_file.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    try:
+        upload_response = requests.post("http://localhost:4001/etl/upload", files=files)
+        if upload_response.status_code == 200:
+            st.success("Final file successfully uploaded!")
+        else:
+            st.error(f"Upload failed with status code {upload_response.status_code}")
+    except Exception as e:
+        st.error(f"Upload failed: {e}")
+
     response = requests.post(f"http://{mode}:8000/results/quality_check", files=files)
 
     if response.status_code == 200:

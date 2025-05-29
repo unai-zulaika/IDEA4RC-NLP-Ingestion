@@ -1,0 +1,26 @@
+{
+    "Plausibility": {
+        "Passed": 99,
+        "Failed": 1,
+        "Total": 100,
+        "PercentagePass": "99.0%"
+    },
+    "Conformance": {
+        "Passed": 299,
+        "Failed": 1,
+        "Total": 300,
+        "PercentagePass": "99.7%"
+    },
+    "Completeness": {
+        "Passed": 261,
+        "Failed": 3,
+        "Total": 264,
+        "PercentagePass": "98.9%"
+    },
+    "Total": {
+        "Passed": 659,
+        "Failed": 5,
+        "Total": 664,
+        "PercentagePass": "99.2%"
+    }
+}
