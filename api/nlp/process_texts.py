@@ -36,14 +36,14 @@ def process_texts(texts: pandas.DataFrame, excel_data: pandas.DataFrame) -> pand
 
 
     summary_dictionary_path = script_dir / "sarcoma_dictionary.json"
-    values_dictionary_path = script_dir / "sarcoma_dictionary_values.json"
+    # values_dictionary_path = script_dir / "sarcoma_dictionary_values.json"
     regexp_dictionary_path = script_dir / "sarcoma_dictionary_regexp.json"
 
     # Load regex patterns from JSON
     with summary_dictionary_path.open("r", encoding="utf-8") as file:
         summary_dict: dict[str, str] = json.load(file)
-    with values_dictionary_path.open("r", encoding="utf-8") as file:
-        values_dict: dict[str, str] = json.load(file)
+    # with values_dictionary_path.open("r", encoding="utf-8") as file:
+    #     values_dict: dict[str, str] = json.load(file)
     with regexp_dictionary_path.open("r", encoding="utf-8") as file:
         regexp_dict: dict[str, str] = json.load(file)
 
