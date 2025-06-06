@@ -8,7 +8,7 @@
                 "parameter_name": "put date",
                 "parameter_type": "DATE",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "IsolatedLimbPerfusion.startDate"
             },
             {
                 "parameter_name": "list drugs",
@@ -28,19 +28,19 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "at the hosptial": ""
+                        "at the hosptial": "Yes done at the hospital"
                     },
                     {
-                        "outside of the hospital": ""
+                        "outside of the hospital": "Yes done at a different hospital"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "SystemicTreatment.systemictreatmentHospital"
             },
             {
                 "parameter_name": "please specify",
                 "parameter_type": "TEXT",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "SystemicTreatment.typeOfSystemicTreatment"
             }
         ]
     },
@@ -53,7 +53,7 @@
                 "parameter_name": "put date",
                 "parameter_type": "DATE",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "PatientFollowUp.lastContact"
             }
         ]
     },
@@ -61,7 +61,17 @@
         "sentence_id": 224,
         "sentence_name": "Patient lost to follow-up",
         "sentence_content": "Patient has been lost to follow-up",
-        "parameters": []
+        "parameters": [
+            {
+                "parameter_name": "",
+                "parameter_type": "DEFAULT",
+                "value": 4163894,
+                "possible_values": [
+                    4163894
+                ],
+                "associated_variable": "PatientFollowUp.statusOfPatientAtLastFollowUp"
+            }
+        ]
     },
     "233": {
         "sentence_id": 233,
@@ -4111,29 +4121,6 @@
         "sentence_name": "Grading not applicable",
         "sentence_content": "Surgical specimen grading not applicable",
         "parameters": []
-    },
-    "247": {
-        "sentence_id": 247,
-        "sentence_name": "Margins after surgery",
-        "sentence_content": "Margins after surgery: [select value]",
-        "parameters": [
-            {
-                "parameter_name": "select value",
-                "parameter_type": "ENUM",
-                "possible_values": [
-                    {
-                        "R0": ""
-                    },
-                    {
-                        "R1": ""
-                    },
-                    {
-                        "R2": ""
-                    }
-                ],
-                "associated_variable": ""
-            }
-        ]
     },
     "248": {
         "sentence_id": 248,

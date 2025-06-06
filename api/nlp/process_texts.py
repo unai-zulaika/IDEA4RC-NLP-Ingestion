@@ -11,6 +11,7 @@ types_map = {
     "NUMBER": "float",
     "DATE": "date in the ISO format ISO8601  https://en.wikipedia.org/wiki/ISO_8601 ",
     "TEXT": "string",
+    "DEFAULT": "CodeableConcept",
 }
 
 
@@ -118,6 +119,8 @@ def process_texts(texts: pandas.DataFrame, excel_data: pandas.DataFrame) -> pand
                                 value = pos_val[match]
                                 print(f"Found value: {value} for match: {match}")
                                 break
+                    elif parameter_data.get("parameter_type") == "DEFAULT":
+                        value = parameter_data.get("value", match)
                         
                     # only append if there is no existing row with the same core_variable, value, date_ref, and patient_id
                     if existing_rows[
