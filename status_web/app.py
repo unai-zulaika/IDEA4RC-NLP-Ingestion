@@ -126,7 +126,7 @@ if uploaded_qc_file and st.button("Execute Quality Check"):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     }
-    response = requests.post(f"http://{mode}:8000/results/quality_check", files=files)
+    response = requests.post(f"http://{mode}:8000/run/quality_check", files=files)
 
     if response.status_code == 200:
         st.success("Quality check completed successfully. Download result below:")

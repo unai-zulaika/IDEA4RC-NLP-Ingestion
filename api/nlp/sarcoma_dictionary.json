@@ -473,7 +473,7 @@
                 "parameter_name": "put date",
                 "parameter_type": "DATE",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "UNK"
             }
         ]
     },
@@ -1069,10 +1069,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8921/3": ""
+                        "8921/3": "4029024"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -1105,13 +1105,13 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "complete": ""
+                        "complete": "1634643"
                     },
                     {
-                        "incomplete": ""
+                        "incomplete": "1634484"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Surgery.marginsAfterSurgery"
             }
         ]
     },
@@ -1280,28 +1280,28 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "pre-operative": ""
+                        "pre-operative": "4119031"
                     },
                     {
-                        "post-operative": ""
+                        "post-operative": "4118656"
                     },
                     {
-                        "therapeutic (without surgery)": ""
+                        "therapeutic (without surgery)": "4133895"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "SystemicTreatment.chemotherapyInfo"
             },
             {
                 "parameter_name": "provide date",
                 "parameter_type": "DATE",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "SystemicTreatment.endDateSystemicTreatment"
             },
             {
                 "parameter_name": "provide number",
                 "parameter_type": "NUMBER",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "SystemicTreatment.numberOfCycles/Administrations"
             },
             {
                 "parameter_name": "select reason",
@@ -1326,7 +1326,7 @@
                         "unknown": ""
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "SystemicTreatment.reasonForEndOfTreatment"
             }
         ]
     },
@@ -1496,22 +1496,22 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "completion": ""
+                        "completion": "44788181"
                     },
                     {
-                        "toxicity": ""
+                        "toxicity": "4161588"
                     },
                     {
-                        "patient intolerance": ""
+                        "patient intolerance": "4105297"
                     },
                     {
-                        "death": ""
+                        "death": "4306655"
                     },
                     {
-                        "other": ""
+                        "other": "UNK"
                     },
                     {
-                        "unknown": ""
+                        "unknown": "UNK"
                     }
                 ],
                 "associated_variable": ""
@@ -1923,13 +1923,13 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8850/1": ""
+                        "8850/1": "4021372"
                     },
                     {
-                        "8851/3": ""
+                        "8851/3": "4102790"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -1943,10 +1943,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8858/3": ""
+                        "8858/3": "4284833"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -1960,10 +1960,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8852/3": ""
+                        "8852/3": "4101123"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -1977,10 +1977,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8854/3": ""
+                        "8854/3": "4010104"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -1994,10 +1994,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8859/3": ""
+                        "8859/3": "1243142"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2011,10 +2011,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8813/1": ""
+                        "8813/1": "45766452"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2028,10 +2028,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8821/1": ""
+                        "8821/1": "45766452"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2045,10 +2045,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8851/1": ""
+                        "8851/1": "45766468"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2062,10 +2062,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8834/1": ""
+                        "8834/1": "4030132"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2079,10 +2079,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8832/1": ""
+                        "8832/1": "4295283"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2096,16 +2096,16 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8815/0": ""
+                        "8815/0": "37116995"
                     },
                     {
-                        "8815/1": ""
+                        "8815/1": "37116996"
                     },
                     {
-                        "8815/3": ""
+                        "8815/3": "37116997"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2119,10 +2119,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8825/1": ""
+                        "8825/1": "4021373"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2136,10 +2136,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8825/3": ""
+                        "8825/3": "45766454"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2153,10 +2153,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8810/1": ""
+                        "8810/1": "4029679"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2170,10 +2170,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8811/1": ""
+                        "8811/1": "45766450"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2187,10 +2187,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8814/3": ""
+                        "8814/3": "4202374"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2204,10 +2204,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8810/3": ""
+                        "8810/3": "4202374"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2221,10 +2221,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8811/3": ""
+                        "8811/3": "45771359"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2238,10 +2238,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8840/3": ""
+                        "8840/3": "4151677"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2255,10 +2255,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8840/3": ""
+                        "8840/3": "4151677"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2272,10 +2272,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8835/1": ""
+                        "8835/1": "4029525"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2289,10 +2289,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9251/1": ""
+                        "9251/1": "4218898"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2306,16 +2306,16 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9252/0": ""
+                        "9252/0": "4030140"
                     },
                     {
-                        "9252/1": ""
+                        "9252/1": "45766525"
                     },
                     {
-                        "9252/3": ""
+                        "9252/3": "4029655"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2329,10 +2329,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9133/3": ""
+                        "9133/3": "4207381"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2346,10 +2346,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9120/3": ""
+                        "9120/3": "3661612"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2363,10 +2363,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9130/1": ""
+                        "9130/1": "4281384"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2380,10 +2380,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9136/1": ""
+                        "9136/1": "4030139"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2397,10 +2397,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9135/1": ""
+                        "9135/1": "4030138"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2414,10 +2414,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9136/1": ""
+                        "9136/1": "4030139"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2431,10 +2431,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9138/1": ""
+                        "9138/1": "45766492"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2448,13 +2448,13 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8711/0": ""
+                        "8711/0": "4014760"
                     },
                     {
-                        "8711/3": ""
+                        "8711/3": "4028856"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2468,10 +2468,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8897/1": ""
+                        "8897/1": "4327493"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2485,10 +2485,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8891/1": ""
+                        "8891/1": "4173148"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2502,10 +2502,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8896/1": ""
+                        "8896/1": "600675"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2519,10 +2519,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8898/1": ""
+                        "8898/1": "4029023"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2536,10 +2536,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8890/3": ""
+                        "8890/3": "37151903"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2553,10 +2553,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8891/3": ""
+                        "8891/3": "4173148"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2570,10 +2570,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8896/3": ""
+                        "8896/3": "4059632"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2587,10 +2587,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8898/1": ""
+                        "8898/1": "4029023"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2604,10 +2604,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8910/3": ""
+                        "8910/3": "4031038"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2621,10 +2621,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8920/3": ""
+                        "8920/3": "4272931"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2638,10 +2638,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8901/3": ""
+                        "8901/3": "4298312"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2655,10 +2655,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8912/3": ""
+                        "8912/3": "4029528"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2672,10 +2672,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9180/3": ""
+                        "9180/3": "37152049"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2689,10 +2689,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9540/3": ""
+                        "9540/3": "4062426"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2706,10 +2706,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9540/3": ""
+                        "9540/3": "4062426"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2723,10 +2723,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9580/0": ""
+                        "9580/0": "4005360"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2740,10 +2740,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9580/3": ""
+                        "9580/3": "4027842"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2757,10 +2757,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8830/1": ""
+                        "8830/1": "4096931"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2774,10 +2774,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8836/1": ""
+                        "8836/1": "4029526"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2791,10 +2791,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8802/1": ""
+                        "8802/1": "45766448"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2808,10 +2808,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8811/1": ""
+                        "8811/1": "45766450"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2831,10 +2831,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9040/3": ""
+                        "9040/3": "4268491"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2848,10 +2848,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8804/3": ""
+                        "8804/3": "4244886"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2865,10 +2865,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9581/3": ""
+                        "9581/3": "4339208"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2882,10 +2882,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9044/3": ""
+                        "9044/3": "4155072"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2899,10 +2899,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9231/3": ""
+                        "9231/3": "4328092"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2916,10 +2916,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8806/3": ""
+                        "8806/3": "4029522"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2933,10 +2933,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8963/3": ""
+                        "8963/3": "4307938"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2950,16 +2950,16 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8714/0": ""
+                        "8714/0": "45771358"
                     },
                     {
-                        "8714/1": ""
+                        "8714/1": "4304780"
                     },
                     {
-                        "8714/3": ""
+                        "8714/3": "45766447"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2973,10 +2973,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9137/3": ""
+                        "9137/3": "45766495"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -2990,10 +2990,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8805/3": ""
+                        "8805/3": "4029021"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3007,13 +3007,13 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8982/0": ""
+                        "8982/0": "4239519"
                     },
                     {
-                        "8982/3": ""
+                        "8982/3": "4029680"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3027,16 +3027,16 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8842/0": ""
+                        "8842/0": "4028565"
                     },
                     {
-                        "8842/1": ""
+                        "8842/1": "4028565"
                     },
                     {
-                        "8842/3": ""
+                        "8842/3": "45766467"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3050,16 +3050,16 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8990/0": ""
+                        "8990/0": "4242559"
                     },
                     {
-                        "8990/1": ""
+                        "8990/1": "4195947"
                     },
                     {
-                        "8990/3": ""
+                        "8990/3": "4233081"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3073,10 +3073,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8841/0": ""
+                        "8841/0": "4239956"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3102,10 +3102,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9364/3": ""
+                        "9364/3": "45766528"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3119,10 +3119,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9366/3": ""
+                        "9366/3": "37155974"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3136,10 +3136,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9367/3": ""
+                        "9367/3": "37152438"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3153,10 +3153,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9368/3": ""
+                        "9368/3": "37152440"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3170,10 +3170,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8930/3": ""
+                        "8930/3": "37152181"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3187,10 +3187,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8931/3": ""
+                        "8931/3": "4028557"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3204,10 +3204,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8590/1": ""
+                        "8590/1": "37151856"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3221,10 +3221,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9020/0": ""
+                        "9020/0": "4040991"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3238,10 +3238,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9020/1": ""
+                        "9020/1": "4323562"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3255,10 +3255,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9020/1": ""
+                        "9020/1": "4323562"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3272,10 +3272,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9020/3": ""
+                        "9020/3": "4337106"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3289,10 +3289,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9758/3": ""
+                        "9758/3": "4028710"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3306,10 +3306,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9755/3": ""
+                        "9755/3": "4029172"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3329,10 +3329,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9756/3": ""
+                        "9756/3": "4029173"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3346,10 +3346,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9759/3": ""
+                        "9759/3": "42872917"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3363,10 +3363,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "9045/3": ""
+                        "9045/3": "42511585"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3380,10 +3380,10 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "8933/3": ""
+                        "8933/3": "4135215"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             }
         ]
     },
@@ -3396,7 +3396,7 @@
                 "parameter_name": "mitoses count",
                 "parameter_type": "NUMBER",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "Diagnosis.histologySubgroup"
             },
             {
                 "parameter_name": "number of HPFs",
@@ -3528,20 +3528,20 @@
                 "parameter_name": "provide date",
                 "parameter_type": "DATE",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "Surgery.dateOfSurgery"
             },
             {
                 "parameter_name": "select result",
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "complete": ""
+                        "complete": "1634643"
                     },
                     {
-                        "incomplete": ""
+                        "incomplete": "1634484"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Surgery.marginsAfterSurgery"
             }
         ]
     },
@@ -3738,22 +3738,22 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "completion": ""
+                        "completion": "44788181"
                     },
                     {
-                        "toxicity": ""
+                        "toxicity": "4161588"
                     },
                     {
-                        "patient intolerance": ""
+                        "patient intolerance": "4105297"
                     },
                     {
-                        "death": ""
+                        "death": "4306655"
                     },
                     {
-                        "other": ""
+                        "other": "UNK"
                     },
                     {
-                        "unknown": ""
+                        "unknown": "UNK"
                     }
                 ],
                 "associated_variable": ""
@@ -3889,62 +3889,62 @@
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "pre-operative": ""
+                        "pre-operative": "4059384"
                     },
                     {
-                        "intra-operative": ""
+                        "intra-operative": "UNK"
                     },
                     {
-                        "post-operative": ""
+                        "post-operative": "4058775"
                     },
                     {
-                        "therapeutic (radiotherapy without surgery)": ""
+                        "therapeutic (radiotherapy without surgery)": "UNK"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Radiotherapy.setting"
             },
             {
                 "parameter_name": "put total dose",
                 "parameter_type": "NUMBER",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "Radiotherapy.totalDoseGy"
             },
             {
                 "parameter_name": "put number of",
                 "parameter_type": "NUMBER",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "Radiotherapy.numberOfFractions"
             },
             {
                 "parameter_name": "put date",
                 "parameter_type": "DATE",
                 "possible_values": [],
-                "associated_variable": ""
+                "associated_variable": "Radiotherapy.endDate"
             },
             {
                 "parameter_name": "select reason",
                 "parameter_type": "ENUM",
                 "possible_values": [
                     {
-                        "completion": ""
+                        "completion": "44788181"
                     },
                     {
-                        "toxicity": ""
+                        "toxicity": "4161588"
                     },
                     {
-                        "patient intolerance": ""
+                        "patient intolerance": "4105297"
                     },
                     {
-                        "death": ""
+                        "death": "4306655"
                     },
                     {
-                        "other": ""
+                        "other": "UNK"
                     },
                     {
-                        "unknown": ""
+                        "unknown": "UNK"
                     }
                 ],
-                "associated_variable": ""
+                "associated_variable": "Radiotherapy_rtTreatmentCompletedAsPlanned"
             }
         ]
     },

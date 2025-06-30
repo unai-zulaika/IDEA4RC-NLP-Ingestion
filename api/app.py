@@ -3,6 +3,7 @@ import io
 import logging
 import sqlite3
 import uuid
+import tempfile
 
 import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
@@ -11,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from link_service.linking_service import link_rows
 from nlp.process_texts import process_texts
 from quality_checks.quality_check import quality_check
-
+import os
 
 app = FastAPI()
 
@@ -93,6 +94,66 @@ def store_step_output(task_id: str, step_name: str, data: pd.DataFrame):
     data.to_sql(f"{task_id}_{step_name}", con=conn, if_exists="replace", index=False)  # type: ignore
     conn.close()
 
+
+# @app.post("/run/quality_check")
+# def run_quality_check(
+#     data_file: bytes,
+# ):
+#     """
+#     Run quality checks on the provided data and return results.
+#     """
+#     try:
+#         # Read the uploaded files
+#         # data_content = pd.read_excel(io.BytesIO(data_file.file.read()))  # type: ignore
+#         data_content: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))  # type: ignore
+
+#         # Run quality checks
+#         # final_data, quality_report = quality_check(data_content, text_content)
+#         quality_check(data_content)  # type: ignore 
+
+#         return {
+#             "message": "Quality check completed successfully."
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e)) from e
+
+async def run_quality_check(data_file: bytes):
+    """Function to run the quality check task asynchronously.
+
+    Args:
+        data_file (bytes): _description_
+    """
+    # 1) read into DF
+    df = pd.read_excel(io.BytesIO(data_file))
+
+    # 2) write to a temporary Excel file
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = os.path.join(tmpdir, "input.xlsx")
+        df.to_excel(tmp_path, index=False)
+
+        # 3) call your core function, passing the path
+        quality_check(
+            tmp_path,
+        )
+
+
+@app.post("/run/quality_check")
+async def quality_check_call(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """Starts the pipeline"""
+    task_id = str(uuid.uuid4())
+    data_content = await file.read()
+
+    # Start the pipeline in the background
+    # background_tasks.add_task(run_quality_check, data_content)
+    await run_quality_check(data_content)
+
+    return {
+        "task_id": task_id,
+        "message": "Pipeline started! Use this task_id to check the status later.",
+    }
 
 @app.get("/results/{task_id}/{step_name}")
 def get_step_results_as_excel(task_id: str, step_name: str):

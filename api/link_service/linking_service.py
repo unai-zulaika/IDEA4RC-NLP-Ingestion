@@ -6,7 +6,7 @@ from pathlib import Path
 def link_rows(data: pd.DataFrame) -> pd.DataFrame:
     """
     Links rows in the DataFrame by populating the 'linked_to' column,
-    based on entity_mappings.json and date logic.
+    based on entity_mappings.json and date logic. 
 
     Args:
         data (pd.DataFrame): Must contain 'record_id', 'patient_id',
@@ -73,43 +73,6 @@ def link_rows(data: pd.DataFrame) -> pd.DataFrame:
     
     # 7) Return the original DataFrame with the 'linked_to' column
     return df
-    # fallback date column if present
-    # df['date_ref.1'] = pd.to_datetime(df.get('date_ref.1', pd.NaT), errors='coerce')
-    # # choose whichever exists
-    # df['eff_date']   = df['date_ref'].fillna(df['date_ref.1'])
-
-    # # 6) Prepare sorted lookup frame
-    # df_lookup = df.sort_values(['patient_id', 'eff_date']).copy()
-    # print(df)
-
-    # # 7) Define per-row linker
-    # def _find_linked(r):
-    #     targets = entity_mappings.get(r['entity'])
-    #     if not targets:
-    #         return pd.NA
-    #     if isinstance(targets, str):
-    #         targets = [targets]
-    #     mask = (
-    #         (df_lookup['patient_id'] == r['patient_id']) &
-    #         (df_lookup['entity'].isin(targets)) &
-    #         (df_lookup['eff_date'] <= r['eff_date'])
-    #     )
-    #     cands = df_lookup.loc[mask]
-    #     if cands.empty:
-    #         return pd.NA
-    #     # pick the record with the max eff_date
-    #     latest_idx = cands['eff_date'].idxmax()
-    #     return df_lookup.at[latest_idx, 'record_id']
-
-    # # 8) Apply and write back into a fresh 'linked_to' column
-    # result = df_orig.copy()
-    # result['linked_to'] = pd.NA
-    # # only assign for rows that survived the dropna
-    # linked_vals = df.apply(_find_linked, axis=1)
-    # result.loc[df.index, 'linked_to'] = linked_vals.values
-
-    # return result
-
 
 if __name__ == "__main__":
     # quick smoke‐test
