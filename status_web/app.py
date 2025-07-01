@@ -37,7 +37,8 @@ st.write(
     """
 )
 
-mode = "localhost"
+# mode = "localhost"
+mode = "backend"
 
 # Initialize session state
 if "task_id" not in st.session_state:

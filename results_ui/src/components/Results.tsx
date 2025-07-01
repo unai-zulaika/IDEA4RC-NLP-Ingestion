@@ -92,7 +92,7 @@ export default function Results() {
                         const entityName = fname === "results.json"
                             ? "non_repeatable"
                             : fname.replace(/^results_|\.json$/g, "");
-                        (run.validation_result?.results ?? []).forEach((res: any) => {
+                        ((run as any).validation_result?.results ?? []).forEach((res: any) => {
                             if (res.success) return;
                             const varName = res.expectation_config?.kwargs?.column ?? "Table-level";
                             const qcName = res.expectation_config?.expectation_type ?? "N/A";

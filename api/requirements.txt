@@ -8,3 +8,5 @@ python-multipart==0.0.20
 numpy==1.26.1
 transformers==4.35.2
 torch==2.1.2
+great-expectations==0.18.15
+great-expectations-experimental==0.1.20240226036

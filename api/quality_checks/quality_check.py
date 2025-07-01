@@ -8,7 +8,7 @@ import argparse
 
 import pandas as pd
 # from custom_expectations.plugins.expectations.expect_colum_pair_to_be_null_if import ExpectColumnPairToBeNullIf
-from api.quality_checks.custom_expectations.plugins.expectations.expect_colum_pair_to_be_null_if import ExpectColumnPairToBeNullIf
+from quality_checks.custom_expectations.plugins.expectations.expect_colum_pair_to_be_null_if import ExpectColumnPairToBeNullIf
 from great_expectations_experimental.expectations.expect_column_values_not_to_be_future_date import ExpectColumnValuesNotToBeFutureDate
 
 
