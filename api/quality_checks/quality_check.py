@@ -150,7 +150,12 @@ def format_normalized_table(filename, formated_filepath, non_repeatable_vars_set
     # load filename
     # Force the datetime column to be read as a string to avoid conversion issues with great_expectations. GE needs to have the datetime column in str.
     # input_df = pd.read_excel(filename, dtype=str)
-    input_df = read_table(filename, dtype=str)
+    
+    # check if filename is a pandas object already
+    if isinstance(filename, pd.DataFrame):
+        input_df = filename
+    else:
+        input_df = read_table(filename, dtype=str)
 
     output_data = []
     patients_data = {}
@@ -200,12 +205,15 @@ def quality_check(data):
     #      replace data_file with a single temporary Excel so that everything
     #      below keeps working unchanged.
     # ─────────────────────────────────────────────────────────────────────────────
+
     try:
         candidate = json.loads(data_file)
         if not isinstance(candidate, list):
             raise ValueError            # it was a plain path string
         data_files = candidate          # ✔ we really have a list
     except (json.JSONDecodeError, ValueError):
+        data_files = [data_file]   # fall back → single file
+    except Exception as e:
         data_files = [data_file]   # fall back → single file
 
     if len(data_files) > 1:
@@ -1171,66 +1179,71 @@ def quality_check(data):
 
     # --- Phase × Entity presence summary ---------------------------------------
     # Creates phase_entity_results.json for the UI “By phase” tab
-    phase_entity = {}     # (entity_instance, phase) → present-counter
 
-    focus_rows = df_with_phase[df_with_phase.core_variable.isin(notnull_vars)]
+    # check if df_with_phase is empty
+    if df_long_all.empty:
+        print("No data for phase-entity summary, skipping")
+    else:
+        phase_entity = {}     # (entity_instance, phase) → present-counter
 
-    for _, r in focus_rows.iterrows():
-        # entity name (e.g. "Surgery") + its record_id to keep instances separate
-        # Surgery / RadiotherapySession …
-        ent = r.core_variable.split('.')[0]
-        ent_inst = f"{ent}{r.record_id or ''}"       # Surgery1, Surgery2 …
-        key = (ent_inst, r.phase)
+        focus_rows = df_with_phase[df_with_phase.core_variable.isin(notnull_vars)]
 
-        rec = phase_entity.setdefault(
-            key, {"Entity": ent_inst, "Phase": r.phase, "Present": 0}
-        )
-        # count a variable as “present” if it’s non-null/non-blank
-        if pd.notna(r.value) and str(r.value).strip():
-            rec["Present"] += 1
+        for _, r in focus_rows.iterrows():
+            # entity name (e.g. "Surgery") + its record_id to keep instances separate
+            # Surgery / RadiotherapySession …
+            ent = r.core_variable.split('.')[0]
+            ent_inst = f"{ent}{r.record_id or ''}"       # Surgery1, Surgery2 …
+            key = (ent_inst, r.phase)
 
-    phase_entity_json = os.path.join(app_path, "phase_entity_results.json")
-    with open(phase_entity_json, "w", encoding="utf-8") as fh:
-        json.dump(list(phase_entity.values()), fh, indent=4)
+            rec = phase_entity.setdefault(
+                key, {"Entity": ent_inst, "Phase": r.phase, "Present": 0}
+            )
+            # count a variable as “present” if it’s non-null/non-blank
+            if pd.notna(r.value) and str(r.value).strip():
+                rec["Present"] += 1
 
-    print(f"Phase-entity summary saved to: {phase_entity_json}")
+        phase_entity_json = os.path.join(app_path, "phase_entity_results.json")
+        with open(phase_entity_json, "w", encoding="utf-8") as fh:
+            json.dump(list(phase_entity.values()), fh, indent=4)
 
-    # --- Phase × Entity × Patient summary --------------------------------------
-    patient_phase_entity = {}      # (pid, ent_inst, phase) → counters
+        print(f"Phase-entity summary saved to: {phase_entity_json}")
 
-    for _, r in focus_rows.iterrows():
-        ent = r.core_variable.split('.')[0]          # Surgery / Biopsy / …
-        ent_inst = f"{ent}{r.record_id or ''}"            # Surgery1, Surgery2 …
-        key = (r.patient_id, ent_inst, r.phase)
+        # --- Phase × Entity × Patient summary --------------------------------------
+        patient_phase_entity = {}      # (pid, ent_inst, phase) → counters
 
-        rec = patient_phase_entity.setdefault(
-            key,
-            {
-                "PatientID": str(r.patient_id),
-                "Entity":    ent_inst,
-                "Phase":     r.phase,
-                "Total":     0,
-                "Present":   0,
-                "Missing":   [],  # ⬅︎  new
-            }
-        )
+        for _, r in focus_rows.iterrows():
+            ent = r.core_variable.split('.')[0]          # Surgery / Biopsy / …
+            ent_inst = f"{ent}{r.record_id or ''}"            # Surgery1, Surgery2 …
+            key = (r.patient_id, ent_inst, r.phase)
 
-        rec["Total"] += 1
-        if pd.notna(r.value) and str(r.value).strip():
-            rec["Present"] += 1
-        else:
-            rec["Missing"].append(r.core_variable)
+            rec = patient_phase_entity.setdefault(
+                key,
+                {
+                    "PatientID": str(r.patient_id),
+                    "Entity":    ent_inst,
+                    "Phase":     r.phase,
+                    "Total":     0,
+                    "Present":   0,
+                    "Missing":   [],  # ⬅︎  new
+                }
+            )
 
-    rec["Complete"] = rec["Present"] == rec["Total"]
+            rec["Total"] += 1
+            if pd.notna(r.value) and str(r.value).strip():
+                rec["Present"] += 1
+            else:
+                rec["Missing"].append(r.core_variable)
 
-    # ── decide completeness ────────────────────────────────────────────────────
-    for rec in patient_phase_entity.values():
-        rec["Complete"] = rec["Present"] == rec["Total"]    # True / False
+        rec["Complete"] = rec["Present"] == rec["Total"]
 
-    out = os.path.join(app_path, "patient_entity_phase_results.json")
-    with open(out, "w", encoding="utf-8") as fh:
-        json.dump(list(patient_phase_entity.values()), fh, indent=4)
-    print(f"Patient-entity-phase summary saved to: {out}")
+        # ── decide completeness ────────────────────────────────────────────────────
+        for rec in patient_phase_entity.values():
+            rec["Complete"] = rec["Present"] == rec["Total"]    # True / False
+
+        out = os.path.join(app_path, "patient_entity_phase_results.json")
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump(list(patient_phase_entity.values()), fh, indent=4)
+        print(f"Patient-entity-phase summary saved to: {out}")
 
 
     # --- Generate Dimension Summary (Aggregated) ---
@@ -1456,30 +1469,33 @@ def quality_check(data):
     # ────────────────────────────────────────────────────────────────
     #  Patient  ×  Phase missingness summary
     # ────────────────────────────────────────────────────────────────
-    per_patient_phase = {}      # (pid, phase) → counters
+    if df_long_all.empty:
+        print("No data for patient-phase summary, skipping")
+    else:
+        per_patient_phase = {}      # (pid, phase) → counters
 
-    for _, r in df_with_phase.iterrows():
-        if r.core_variable not in notnull_vars:
-            continue
-        key = (r.patient_id, r.phase)
-        rec = per_patient_phase.setdefault(key,
-                                        {"PatientID": r.patient_id, "Phase": r.phase,
-                                            "Present": 0, "Missing": 0, "Total": 0})
-        rec["Total"] += 1
-        if pd.isna(r.value) or str(r.value).strip() == "":
-            rec["Missing"] += 1
-        else:
-            rec["Present"] += 1
+        for _, r in df_with_phase.iterrows():
+            if r.core_variable not in notnull_vars:
+                continue
+            key = (r.patient_id, r.phase)
+            rec = per_patient_phase.setdefault(key,
+                                            {"PatientID": r.patient_id, "Phase": r.phase,
+                                                "Present": 0, "Missing": 0, "Total": 0})
+            rec["Total"] += 1
+            if pd.isna(r.value) or str(r.value).strip() == "":
+                rec["Missing"] += 1
+            else:
+                rec["Present"] += 1
 
-    for rec in per_patient_phase.values():
-        rec["MissingPercent"] = (
-            round(rec["Missing"]/rec["Total"]*100, 2) if rec["Total"] else 0.0)
+        for rec in per_patient_phase.values():
+            rec["MissingPercent"] = (
+                round(rec["Missing"]/rec["Total"]*100, 2) if rec["Total"] else 0.0)
 
-    out = list(per_patient_phase.values())
-    with open(os.path.join(app_path,
-            "patient_phase_summary_results.json"), "w") as fh:
-        json.dump(out, fh, indent=4)
-    print("Patient-phase summary written.")
+        out = list(per_patient_phase.values())
+        with open(os.path.join(app_path,
+                "patient_phase_summary_results.json"), "w") as fh:
+            json.dump(out, fh, indent=4)
+        print("Patient-phase summary written.")
 
 
     print("Finished generating all reports and summaries.")

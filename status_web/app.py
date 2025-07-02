@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import time
 
 st.set_page_config(page_title='IDEA4RC data ingestion', page_icon="LogoIDEA4RC-300x200.jpg", layout="wide")
 # st.set_page_config(page_title='IDEA4RC data ingestion', page_icon=favicon) # , page_icon = favicon, layout = 'wide', initial_sidebar_state = 'auto')
@@ -77,15 +78,19 @@ if uploaded_excel and uploaded_text:
 
 #### ONLY FROM LINKING ONWARDS
 
+# ─── OPTION 2 : linking service only ───────────────────────────────────────────
+
 st.divider()
 st.title("_OPTION 2_ :blue[Run the linking service]")
 
-st.write("### Run the linking service on a File")
 uploaded_linking_file = st.file_uploader(
-    "Upload a file to run the linking service", type=["xlsx"], key="linking_file_uploader"
+    "Upload a file to run the linking service",
+    type=["xlsx"],
+    key="linking_file_uploader",
 )
 
 if uploaded_linking_file and st.button("Execute Linking Service"):
+    # kick off the background job
     files = {
         "file": (
             uploaded_linking_file.name,
@@ -93,18 +98,49 @@ if uploaded_linking_file and st.button("Execute Linking Service"):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     }
-    response = requests.post(f"http://{mode}:8000/results/linking_service", files=files)
+    resp = requests.post(f"http://{mode}:8000/run/link_rows", files=files)
 
-    if response.status_code == 200:
-        st.success("Linking service completed successfully. Download result below:")
-        st.download_button(
-            label="Download Linking Service Result",
-            data=response.content,
-            file_name=f"linking_service_result.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    if resp.status_code != 200:
+        st.error(f"Error: {resp.json().get('detail', 'Unknown error')}")
+        st.stop()
+
+    task_id = resp.json()["task_id"]
+    st.info(f"Task started (ID {task_id}). This usually finishes in 5-30 s…")
+
+    # simple polling loop with a progress bar
+    bar = st.progress(0, text="Linking rows…")
+    step = ""
+    while step not in ("Completed", "Failed"):
+        time.sleep(2)
+        status = requests.get(f"http://{mode}:8000/status/{task_id}").json()
+        bar.progress(status["progress"], text=status["step"])
+        step = status["step"]
+
+    bar.empty()  # remove the progress bar
+
+    if step == "Failed":
+        st.error(f"Link-rows job failed: {status.get('result', 'no message')}")
+        st.stop()
+
+    # job is done → fetch the real workbook
+    result = requests.get(
+        f"http://{mode}:8000/results/{task_id}/linked_data"
+    )
+    if result.status_code != 200:
+        st.error(
+            f"Finished but couldn’t fetch result: "
+            f"{result.json().get('detail', 'Unknown error')}"
         )
-    else:
-        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+        st.stop()
+
+    st.success("Linking service completed – download the workbook below:")
+    st.download_button(
+        label="Download Linking Service Result",
+        data=result.content,
+        file_name=f"{task_id}_linked_data.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
 
 
 

@@ -94,29 +94,6 @@ def store_step_output(task_id: str, step_name: str, data: pd.DataFrame):
     data.to_sql(f"{task_id}_{step_name}", con=conn, if_exists="replace", index=False)  # type: ignore
     conn.close()
 
-
-# @app.post("/run/quality_check")
-# def run_quality_check(
-#     data_file: bytes,
-# ):
-#     """
-#     Run quality checks on the provided data and return results.
-#     """
-#     try:
-#         # Read the uploaded files
-#         # data_content = pd.read_excel(io.BytesIO(data_file.file.read()))  # type: ignore
-#         data_content: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))  # type: ignore
-
-#         # Run quality checks
-#         # final_data, quality_report = quality_check(data_content, text_content)
-#         quality_check(data_content)  # type: ignore 
-
-#         return {
-#             "message": "Quality check completed successfully."
-#         }
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e)) from e
-
 async def run_quality_check(data_file: bytes):
     """Function to run the quality check task asynchronously.
 
@@ -140,14 +117,11 @@ async def run_quality_check(data_file: bytes):
 @app.post("/run/quality_check")
 async def quality_check_call(
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
-    """Starts the pipeline"""
     task_id = str(uuid.uuid4())
     data_content = await file.read()
 
     # Start the pipeline in the background
-    # background_tasks.add_task(run_quality_check, data_content)
     await run_quality_check(data_content)
 
     return {
@@ -191,6 +165,58 @@ def get_step_results_as_excel(task_id: str, step_name: str):
         if conn is not None:
             conn.close()
 
+async def run_link_rows_task(task_id: str, data_file: bytes):
+    """
+    Background job: run link_rows on a single uploaded spreadsheet.
+    The output is stored with store_step_output so it can be fetched later via
+    /results/{task_id}/linked_data.
+    """
+    task_logger = get_task_logger(task_id)
+
+    try:
+        update_status(task_id, "Initializing", 0)
+        task_logger.info("Link-row task initialised.")
+
+        # Load the uploaded file
+        update_status(task_id, "Loading data", 10)
+        df: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))          # noqa
+        task_logger.info("File read into DataFrame (shape=%s).", df.shape)
+
+        # Run linking
+        update_status(task_id, "Linking rows", 60)
+        linked_df: pd.DataFrame = link_rows(df)                          # noqa
+        task_logger.info("link_rows complete (shape=%s).", linked_df.shape)
+
+        # Persist result so the existing /results route can serve it
+        store_step_output(task_id, "linked_data", linked_df)
+
+        # Mark done
+        update_status(task_id, "Completed", 100, "Link-rows finished.")
+        task_logger.info("Link-row task completed successfully.")
+    except Exception as exc:
+        update_status(task_id, "Failed", 100, str(exc))
+        task_logger.error("Link-row task failed: %s", exc)
+        raise
+
+@app.post("/run/link_rows")
+async def link_rows_call(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """
+    Accepts a single Excel/CSV, runs only link_rows, and returns a task_id.
+    Use /status/{task_id} to track progress and
+    /results/{task_id}/linked_data to download the output Excel.
+    """
+    task_id = str(uuid.uuid4())
+    data_content = await file.read()
+
+    background_tasks.add_task(run_link_rows_task, task_id, data_content)
+
+    return {
+        "task_id": task_id,
+        "message": "link_rows started – poll /status/{task_id} for progress.",
+    }
 
 async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
     """Function to run the pipeline task asynchronously.
@@ -211,7 +237,6 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         task_logger.info("Loading data from uploaded files.")
         excel_data: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))  # type: ignore
         free_texts: pd.DataFrame = pd.read_excel(io.BytesIO(text_file))  # type: ignore
-        # free_texts = text_file.decode("utf-8").splitlines()
 
         await asyncio.sleep(1)  # Simulate processing
 
@@ -236,7 +261,9 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         # Step 4: Data quality check
         update_status(task_id, "Performing data quality checks", 90)
         task_logger.info("Performing data quality checks.")
-        final_data, quality_report = quality_check(linked_data)
+        # final_data, quality_report = quality_check(linked_data)
+        quality_check(linked_data)
+        final_data = linked_data  
         store_step_output(task_id, "quality_check", final_data)
 
         # Save result (simulate)
