@@ -1,11 +1,14 @@
 import streamlit as st
 import requests
 import time
+import os
 
 st.set_page_config(page_title='IDEA4RC data ingestion', page_icon="LogoIDEA4RC-300x200.jpg", layout="wide")
 # st.set_page_config(page_title='IDEA4RC data ingestion', page_icon=favicon) # , page_icon = favicon, layout = 'wide', initial_sidebar_state = 'auto')
 
 st.title("IDEA4RC Data Ingestion")
+
+ETL_HOST = os.getenv("ETL_HOST", "localhost:4001")
 
 st.write(
     """
@@ -216,7 +219,7 @@ if uploaded_etl_file and st.button("Execute ETL"):
         )
     }
     try:
-        upload_response = requests.post("http://localhost:4001/etl/upload", files=files)
+        upload_response = requests.post(f"http://{ETL_HOST}/etl/upload", files=files)
         if upload_response.status_code == 200:
             st.success("Final file successfully uploaded!")
         else:
