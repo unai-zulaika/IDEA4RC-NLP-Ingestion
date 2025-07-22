@@ -1,36 +1,23 @@
-import Navbar from "../components/Navbar";
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Stack from "@mui/joy/Stack";
-import Divider from "@mui/joy/Divider";
 import Typography from "@mui/joy/Typography";
-import WorkspacePremiumIcon from "@mui/icons-material/WorkspacePremium";
-import Avatar from "@mui/joy/Avatar";
 import { DataGrid } from "@mui/x-data-grid";
 import type { GridColDef } from "@mui/x-data-grid/models";
 import Tabs from "@mui/joy/Tabs";
 import TabList from "@mui/joy/TabList";
 import Tab, { tabClasses } from "@mui/joy/Tab";
 import TabPanel from "@mui/joy/TabPanel";
-import Button from "@mui/joy/Button";
-import { Link as RouterLink } from "react-router-dom";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
-import Modal from "@mui/joy/Modal";
-import ModalDialog from "@mui/joy/ModalDialog";
-import DialogTitle from "@mui/joy/DialogTitle";
-import DialogContent from "@mui/joy/DialogContent";
-import DialogActions from "@mui/joy/DialogActions";
-import IconButton from "@mui/joy/IconButton";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import ClearIcon from "@mui/icons-material/Clear";
 import { saveAs } from "file-saver";
 import PatientTimeline from "../components/PatientsTimeline";
 
 // Utility to fetch JSON from public/data folder
 async function loadJson<T = any>(fileName: string): Promise<T> {
-    const res = await fetch(`/data/${fileName}`);
+    const res = await fetch(`/data/results/${fileName}`);
     if (!res.ok) throw new Error(`Failed to fetch ${fileName}: ${res.statusText}`);
     return res.json();
 }

@@ -9,6 +9,7 @@ st.set_page_config(page_title='IDEA4RC data ingestion', page_icon="LogoIDEA4RC-3
 st.title("IDEA4RC Data Ingestion")
 
 ETL_HOST = os.getenv("ETL_HOST", "localhost:4001")
+RESULTS_UI_HOST = os.getenv("RESULTS_UI_HOST", "localhost:5173")
 
 st.write(
     """
@@ -42,7 +43,8 @@ st.write(
 )
 
 # mode = "localhost"
-mode = "backend"
+# mode = "backend"
+mode = os.getenv("API_HOST", "localhost:8000")  # Default to localhost if not set
 
 # Initialize session state
 if "task_id" not in st.session_state:
@@ -70,7 +72,7 @@ if uploaded_excel and uploaded_text:
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",),
         }
         # Start the pipeline
-        response = requests.post(f"http://{mode}:8000/pipeline", files=files)
+        response = requests.post(f"http://{mode}/pipeline", files=files)
         if response.status_code == 200:
             st.session_state.task_id = response.json()["task_id"]
             st.success(f"Pipeline started! Task ID: {st.session_state.task_id}")
@@ -101,7 +103,7 @@ if uploaded_linking_file and st.button("Execute Linking Service"):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     }
-    resp = requests.post(f"http://{mode}:8000/run/link_rows", files=files)
+    resp = requests.post(f"http://{mode}/run/link_rows", files=files)
 
     if resp.status_code != 200:
         st.error(f"Error: {resp.json().get('detail', 'Unknown error')}")
@@ -115,7 +117,7 @@ if uploaded_linking_file and st.button("Execute Linking Service"):
     step = ""
     while step not in ("Completed", "Failed"):
         time.sleep(2)
-        status = requests.get(f"http://{mode}:8000/status/{task_id}").json()
+        status = requests.get(f"http://{mode}/status/{task_id}").json()
         bar.progress(status["progress"], text=status["step"])
         step = status["step"]
 
@@ -127,7 +129,7 @@ if uploaded_linking_file and st.button("Execute Linking Service"):
 
     # job is done → fetch the real workbook
     result = requests.get(
-        f"http://{mode}:8000/results/{task_id}/linked_data"
+        f"http://{mode}/results/{task_id}/linked_data"
     )
     if result.status_code != 200:
         st.error(
@@ -166,7 +168,7 @@ if uploaded_qc_file and st.button("Execute Quality Check"):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     }
-    response = requests.post(f"http://{mode}:8000/run/quality_check", files=files)
+    response = requests.post(f"http://{mode}/run/quality_check", files=files)
 
     if response.status_code == 200:
         st.success("Quality check completed successfully. Download result below:")
@@ -193,8 +195,8 @@ if st.button("See Data Quality Report"):
 if st.session_state.data_quality_report:
     st.markdown("## Data Report")
     st.components.v1.html(
-        """
-        <iframe src="http://localhost:5173/" width="100%" height="1000" style="border:none;"></iframe>
+        f"""
+        <iframe src="http://{RESULTS_UI_HOST}/" width="100%" height="1000" style="border:none;"></iframe>
         """,
         height=1000
     )
@@ -227,7 +229,7 @@ if uploaded_etl_file and st.button("Execute ETL"):
     except Exception as e:
         st.error(f"Upload failed: {e}")
 
-    response = requests.post(f"http://{mode}:8000/results/quality_check", files=files)
+    response = requests.post(f"http://{mode}/results/quality_check", files=files)
 
     if response.status_code == 200:
         st.success("Quality check completed successfully. Download result below:")
@@ -250,7 +252,7 @@ task_id_input = st.text_input("Enter Task ID to check status:")
 
 if st.button("Check Status"):
     if task_id_input:
-        response = requests.get(f"http://{mode}:8000/status/{task_id_input}")
+        response = requests.get(f"http://{mode}/status/{task_id_input}")
         if response.status_code == 200:
             status = response.json()
             st.write(f"Step: {status['step']}")
@@ -259,7 +261,7 @@ if st.button("Check Status"):
                 st.write(f"Result: {status['result']}")
 
             response_data_1 = requests.get(
-                f"http://{mode}:8000/results/{task_id_input}/processed_texts"
+                f"http://{mode}/results/{task_id_input}/processed_texts"
             )
             if response_data_1.status_code == 200:
                 # Provide the file content for download
@@ -275,7 +277,7 @@ if st.button("Check Status"):
                 )
 
             response_data_2 = requests.get(
-                f"http://{mode}:8000/results/{task_id_input}/linked_data"
+                f"http://{mode}/results/{task_id_input}/linked_data"
             )
             if response_data_2.status_code == 200:
                 # Provide the file content for download
@@ -291,7 +293,7 @@ if st.button("Check Status"):
                 )
 
             response_data_3 = requests.get(
-                f"http://{mode}:8000/results/{task_id_input}/quality_check"
+                f"http://{mode}/results/{task_id_input}/quality_check"
             )
             if response_data_3.status_code == 200:
                 st.download_button(
@@ -314,7 +316,7 @@ if st.button("Check Status"):
                                     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                                 )
                             }
-                            upload_response = requests.post("http://localhost:4001/etl/upload", files=files)
+                            upload_response = requests.post(f"http://{ETL_HOST}/etl/upload", files=files)
                             if upload_response.status_code == 200:
                                 st.success("Final file successfully uploaded!")
                             else:
@@ -337,7 +339,7 @@ task_id_logs = st.text_input("Enter Task ID to view logs:")
 
 if st.button("Fetch Logs"):
     if task_id_logs:
-        response = requests.get(f"http://{mode}:8000/logs/{task_id_logs}")
+        response = requests.get(f"http://{mode}/logs/{task_id_logs}")
         if response.status_code == 200:
             logs = response.json()["logs"]
             st.write("### Logs:")
