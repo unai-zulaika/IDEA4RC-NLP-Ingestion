@@ -12,6 +12,10 @@ RUN npm ci
 COPY . .
 
 RUN apk add --no-cache bash
+
+ARG BASE_URL_PATH=/
+ENV BASE_URL_PATH=$BASE_URL_PATH
+
 # Build the app
 RUN npm run build
 
