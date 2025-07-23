@@ -13,7 +13,7 @@ COPY . .
 
 RUN apk add --no-cache bash
 
-ARG BASE_URL_PATH=/
+ARG BASE_URL_PATH=/nlp/results
 ENV BASE_URL_PATH=$BASE_URL_PATH
 
 # Build the app

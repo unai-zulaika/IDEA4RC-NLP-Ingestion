@@ -209,7 +209,7 @@ st.title("_OPTION 4_ :blue[Run ETL]")
 st.write("### Run ETL on a File")
 
 uploaded_etl_file = st.file_uploader(
-    "Upload a file to run ETL", type=["xlsx"], key="etl_file_uploader"
+    "Upload a file to run ETL", type=["xlsx", "csv"], key="etl_file_uploader"
 )
 
 if uploaded_etl_file and st.button("Execute ETL"):

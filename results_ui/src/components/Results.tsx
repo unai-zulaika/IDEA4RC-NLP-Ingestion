@@ -14,6 +14,16 @@ import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { saveAs } from "file-saver";
 import PatientTimeline from "../components/PatientsTimeline";
+import dimensionSummary from "/data/results/dimension_summary_results.json";
+import patientSummary from "/data/results/patient_summary_results.json";
+import qcSummary from "/data/results/qc_summary_results.json";
+import variableSummary from "/data/results/variable_summary_results.json";
+import datasourceMissingness from "/data/results/datasource_missingness_results.json";
+import importanceGroupSummary from "/data/results/importance_group_summary_results.json";
+import phaseMissingness from "/data/results/phase_missingness_results.json";
+import patientImportanceSummary from "/data/results/patient_importance_summary_results.json";
+import patientPhaseSummary from "/data/results/patient_phase_summary_results.json";
+import patientEntityPhaseResults from "/data/results/patient_entity_phase_results.json";
 
 // Utility to fetch JSON from public/data folder
 async function loadJson<T = any>(fileName: string): Promise<T> {
@@ -108,7 +118,7 @@ export default function Results() {
         (async () => {
             try {
 
-                const dimensionSummary: any = await loadJson("dimension_summary_results.json");
+                // const dimensionSummary: any = await loadJson("dimension_summary_results.json");
                 const order = ["Plausibility", "Conformance", "Completeness", "Total"];
                 let id = 1;
                 const rows = order.map(cat => withTwoPercents({
@@ -131,9 +141,9 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const data: any[] = await loadJson("patient_summary_results.json");
-                if (!Array.isArray(data)) throw new Error("Not an array");
-                const rows = data.map((item, i) => withTwoPercents({
+                //const data: any[] = await loadJson("patient_summary_results.json");
+                if (!Array.isArray(patientSummary)) throw new Error("Not an array");
+                const rows = patientSummary.map((item, i) => withTwoPercents({
                     id: item.PatientID || i,
                     PatientID: item.PatientID,
                     isPassed: item.Failed === 0,
@@ -156,9 +166,9 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const data: any[] = await loadJson("qc_summary_results.json");
-                if (!Array.isArray(data)) throw new Error("Not an array");
-                const rows = data.map((item, i) => withTwoPercents({
+                // const data: any[] = await loadJson("qc_summary_results.json");
+                if (!Array.isArray(qcSummary)) throw new Error("Not an array");
+                const rows = qcSummary.map((item, i) => withTwoPercents({
                     id: item.ge_name || i,
                     QC: item.ge_name,
                     isPassed: item.failed_checks === 0,
@@ -181,9 +191,9 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const data: any[] = await loadJson("variable_summary_results.json");
-                if (!Array.isArray(data)) throw new Error("Not an array");
-                const rows = data.map((item, i) => withTwoPercents({
+                // const data: any[] = await loadJson("variable_summary_results.json");
+                if (!Array.isArray(variableSummary)) throw new Error("Not an array");
+                const rows = variableSummary.map((item, i) => withTwoPercents({
                     id: item.Variable || i,
                     Variable: item.Variable,
                     isPassed: item.Failed === 0,
@@ -206,9 +216,9 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const data: any[] = await loadJson("datasource_missingness_results.json");
-                if (!Array.isArray(data)) throw new Error("Not an array");
-                const rows = data.map((item, i) => withTwoPercents({
+                // const data: any[] = await loadJson("datasource_missingness_results.json");
+                if (!Array.isArray(datasourceMissingness)) throw new Error("Not an array");
+                const rows = datasourceMissingness.map((item, i) => withTwoPercents({
                     id: item.Datasource || i,
                     Datasource: item.Datasource,
                     isPassed: item.Missing === 0,
@@ -231,9 +241,9 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const data: any[] = await loadJson("importance_group_summary_results.json");
-                if (!Array.isArray(data)) throw new Error("Not an array");
-                const rows = data.map((rec, i) => withTwoPercents({
+                // const data: any[] = await loadJson("importance_group_summary_results.json");
+                if (!Array.isArray(importanceGroupSummary)) throw new Error("Not an array");
+                const rows = importanceGroupSummary.map((rec, i) => withTwoPercents({
                     id: rec.Group || i,
                     Group: rec.Group === "M" ? "High"
                         : rec.Group === "R" ? "Medium"
@@ -259,9 +269,9 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const data: any[] = await loadJson("phase_missingness_results.json");
-                if (!Array.isArray(data)) throw new Error("Not an array");
-                const rows = data.map((rec, i) => withTwoPercents({
+                // const data: any[] = await loadJson("phase_missingness_results.json");
+                if (!Array.isArray(phaseMissingness)) throw new Error("Not an array");
+                const rows = phaseMissingness.map((rec, i) => withTwoPercents({
                     id: rec.Phase || i,
                     Phase: rec.Phase,
                     Present: rec.Present,
@@ -283,14 +293,14 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const raw: any[] = await loadJson("patient_importance_summary_results.json");
-                if (!Array.isArray(raw)) throw new Error("Not an array");
+                // const raw: any[] = await loadJson("patient_importance_summary_results.json");
+                if (!Array.isArray(patientImportanceSummary)) throw new Error("Not an array");
                 const orderMap: Record<string, number> = { M: 0, R: 1, O: 2 };
                 const label = (g: string) => g === "M" ? "High"
                     : g === "R" ? "Medium"
                         : g === "O" ? "Low"
                             : g;
-                const rows = raw.map((r, i) => withTwoPercents({
+                const rows = patientImportanceSummary.map((r, i) => withTwoPercents({
                     id: `${r.PatientID}-${r.Group}-${i}`,
                     PatientID: r.PatientID,
                     Group: label(r.Group),
@@ -318,11 +328,11 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const raw: any[] = await loadJson("patient_phase_summary_results.json");
-                if (!Array.isArray(raw)) throw new Error("Not an array");
+                // const raw: any[] = await loadJson("patient_phase_summary_results.json");
+                if (!Array.isArray(patientPhaseSummary)) throw new Error("Not an array");
                 const PHASES = ["Diagnosis", "Progression", "Recurrence"];
                 const byPid: Record<string, any> = {};
-                raw.forEach(r => { const pid = String(r.PatientID); if (!byPid[pid]) byPid[pid] = {}; byPid[pid][r.Phase] = r; });
+                patientPhaseSummary.forEach(r => { const pid = String(r.PatientID); if (!byPid[pid]) byPid[pid] = {}; byPid[pid][r.Phase] = r; });
                 const rows: any[] = [];
                 Object.keys(byPid).sort((a, b) => Number(a) - Number(b)).forEach(pid => {
                     PHASES.forEach(phase => {
@@ -352,9 +362,9 @@ export default function Results() {
     useEffect(() => {
         (async () => {
             try {
-                const raw: any[] = await loadJson("patient_entity_phase_results.json");
+                // const raw: any[] = await loadJson("patient_entity_phase_results.json");
                 const byPid: Record<string, any[]> = {};
-                raw.forEach(r => {
+                patientEntityPhaseResults.forEach(r => {
                     const pid = String(r.PatientID);
                     if (!byPid[pid]) byPid[pid] = [];
                     let row = byPid[pid].find(x => x.Entity === r.Entity);

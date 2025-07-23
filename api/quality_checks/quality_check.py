@@ -18,7 +18,7 @@ import pandas as pd
 import csv
 
 # At the top of quality_check.py
-BASE_DIR = Path(__file__).parent
+BASE_DIR = "/data/results/"
 
 if os.name == "nt":                      # only needed on Windows
     def utf8_wrapper(stream): return io.TextIOWrapper(
@@ -190,12 +190,12 @@ def format_normalized_table(filename, formated_filepath, non_repeatable_vars_set
 def quality_check(data):
 
     data_file = data
-    repeated_entities_file = BASE_DIR  / "repeteable_entities.json"
+    repeated_entities_file = "/app/quality_checks/repeteable_entities.json"
     # repeated_entities_file = "./repeteable_entities.json"
-    suites_file =  BASE_DIR  / "expectations_data.json"
-    app_path =  BASE_DIR  / "app/"
+    suites_file =  "/app/quality_checks/expectations_data.json"
+    app_path =  BASE_DIR 
     # environment variable app path
-    app_path = os.environ.get("APP_PATH", app_path)
+    # app_path = os.environ.get("APP_PATH", app_path)
     print(f"App path set to: {app_path}")
 
     # ─────────────────────────────────────────────────────────────────────────────
