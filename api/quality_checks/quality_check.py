@@ -29,6 +29,7 @@ if os.name == "nt":                      # only needed on Windows
     os.environ["PYTHONUTF8"] = "1"       # downstream libs respect this too
 # ────────────────────────────────────────────────────────────────────────────────
 
+
 def read_table(path: str, **pd_kwargs) -> pd.DataFrame:
     """
     Load a CSV or Excel file into a DataFrame.
@@ -36,6 +37,13 @@ def read_table(path: str, **pd_kwargs) -> pd.DataFrame:
                (comma / semicolon / tab / pipe) and retry.
     • .xls/.xlsx  →  pd.read_excel
     """
+    if isinstance(path, pd.DataFrame):
+        # honor dtype=str etc. if provided
+        if "dtype" in pd_kwargs and pd_kwargs["dtype"] is str:
+            return path.astype(str)
+        return path
+
+    path = str(path)
     ext = Path(path).suffix.lower()
 
     # ---------- CSV -------------------------------------------------------
@@ -59,6 +67,7 @@ def read_table(path: str, **pd_kwargs) -> pd.DataFrame:
 
     # ---------- unsupported ----------------------------------------------
     raise ValueError(f"Unsupported file type for input data: {ext}")
+
 
 def prepare_repeatable_entity_data(entity_name, original_data_filepath, repeatable_entities_config, app_path):
     """
@@ -150,7 +159,7 @@ def format_normalized_table(filename, formated_filepath, non_repeatable_vars_set
     # load filename
     # Force the datetime column to be read as a string to avoid conversion issues with great_expectations. GE needs to have the datetime column in str.
     # input_df = pd.read_excel(filename, dtype=str)
-    
+
     # check if filename is a pandas object already
     if isinstance(filename, pd.DataFrame):
         input_df = filename
@@ -192,8 +201,8 @@ def quality_check(data):
     data_file = data
     repeated_entities_file = "/app/quality_checks/repeteable_entities.json"
     # repeated_entities_file = "./repeteable_entities.json"
-    suites_file =  "/app/quality_checks/expectations_data.json"
-    app_path =  BASE_DIR 
+    suites_file = "/app/quality_checks/expectations_data.json"
+    app_path = BASE_DIR
     # environment variable app path
     # app_path = os.environ.get("APP_PATH", app_path)
     print(f"App path set to: {app_path}")
@@ -235,7 +244,6 @@ def quality_check(data):
     else:
         # single-file workflow – nothing changes
         data_file = data_files[0]
-    
 
     # Get the absolute path to the current file
     current_file_path = os.path.abspath(__file__)
@@ -247,7 +255,6 @@ def quality_check(data):
         plugins_directory=plugins_directory
     )
     context = gx.get_context(project_config=data_context_config)
-
 
     # --- Load Entity Definitions (rep_entities.json) ---
     with open(repeated_entities_file, encoding="utf8") as f:
@@ -262,11 +269,12 @@ def quality_check(data):
     if "non_repeteables" in repeated_entities_data:
         for entity_name, variables_list in repeated_entities_data["non_repeteables"].items():
             for var_name in variables_list:
-                all_non_repeatable_core_variables.add(f"{entity_name}.{var_name}")
+                all_non_repeatable_core_variables.add(
+                    f"{entity_name}.{var_name}")
 
     # --- Load minimum-cardinality per entity -----------------------------------
     card_file = os.path.join(os.path.dirname(repeated_entities_file),
-                            "entities_cardinality.json")
+                             "entities_cardinality.json")
     try:
         with open(card_file, encoding="utf-8") as fh:
             # e.g.  {"Patient":1, "Surgery":0, ...}
@@ -274,7 +282,6 @@ def quality_check(data):
     except Exception as e:
         print(f"ERROR loading entities_cardinality.json: {e}")
         entity_min_card = {}          # default → treat as 1 (mandatory)
-
 
     # --- Prepare and Validate Non-Repeatable Data ---
     print("\n--- Processing Non-Repeatable Data ---")
@@ -294,7 +301,8 @@ def quality_check(data):
     # --- Load ALL Expectations (from suites_file, which is expectations_data.json) ---
     print(f"\n--- Loading expectations from {suites_file} ---")
     with open(suites_file, encoding="utf8") as f:
-        all_expectations_data = json.load(f)  # This is your expectations_data.json
+        # This is your expectations_data.json
+        all_expectations_data = json.load(f)
 
     # Stores DataFrames for repeatable entities for the Quality Summarization
     repeatable_entity_dataframes = {}
@@ -407,7 +415,7 @@ def quality_check(data):
             method = getattr(current_validator, ge_name, None)
             if method:
                 combined_kwargs = {k: v for d in args_list for k,
-                                v in d.items()}  # Use the modified args_list
+                                   v in d.items()}  # Use the modified args_list
                 combined_kwargs["meta"] = {"dimensions": dimensions}
 
                 validator_name_for_log = "non_repeatable_validator"
@@ -427,7 +435,8 @@ def quality_check(data):
                         and current_validator is non_repeatable_validator):
                     ent = entity_name_for_routing or "UNKNOWN"
                     if entity_min_card.get(ent, 1) == 0:
-                        print(f"    Skipping {ge_name} on optional entity '{ent}'")
+                        print(
+                            f"    Skipping {ge_name} on optional entity '{ent}'")
                         continue
                 # ------------------------------------------------------------------
 
@@ -475,7 +484,6 @@ def quality_check(data):
     print(
         f"Expectation suite '{non_repeatable_suite_name}' saved for non-repeatable data.")
 
-
     dataframe_asset = context.sources.add_pandas(
         "non_repeatable_validator_checkpoint"
     ).add_dataframe_asset(
@@ -483,7 +491,6 @@ def quality_check(data):
         dataframe=df_non_repeatable,
     )
     batch_request = dataframe_asset.build_batch_request()
-
 
     # Checkpoint configuration still uses expectation_suite_name to load the correct suite
     checkpoint_main = context.add_or_update_checkpoint(
@@ -521,7 +528,6 @@ def quality_check(data):
     with open(os.path.join(app_path, 'results_non_repeatable.json'), 'w') as f:
         json.dump(results_dict, f, indent=4)
     print("\nNon-repeatable data validation complete. Results saved.")
-
 
     # For Repeatable Entities
     for entity_name, entity_validator_for_suite_authoring in repeatable_entity_validators.items():  # Renamed for clarity
@@ -577,9 +583,7 @@ def quality_check(data):
             json.dump(entity_checkpoint_result.to_json_dict(), f, indent=4)
         print(f"{entity_name} validation results saved to {entity_results_filename}")
 
-
     # In main.py, after all checkpoint.run() calls
-
 
     # Add main non-repeatable results
     if 'checkpoint_result_main' in locals() and checkpoint_result_main:
@@ -608,9 +612,9 @@ def quality_check(data):
                     (f"Repeatable Entity: {entity_name}", entity_result_dict))
 
     if not all_checkpoint_results_with_source:
-        print("No checkpoint results found to generate detailed error reports or summaries.")
+        print(
+            "No checkpoint results found to generate detailed error reports or summaries.")
         # Potentially exit or skip further processing
-
 
     # In main.py, after populating all_checkpoint_results_with_source
 
@@ -621,7 +625,8 @@ def quality_check(data):
         any_failure_found_overall = False
         for source_description, results_dict in all_checkpoint_results_with_source:
             if not results_dict:
-                print(f"\n--- Validation Results for: {source_description} ---")
+                print(
+                    f"\n--- Validation Results for: {source_description} ---")
                 print("  No results dictionary found for this source.")
                 continue
 
@@ -635,7 +640,8 @@ def quality_check(data):
 
             found_failures_in_this_run = False
             for run_name_key, run_result_data in results_dict.get("run_results", {}).items():
-                validation_result = run_result_data.get("validation_result", {})
+                validation_result = run_result_data.get(
+                    "validation_result", {})
                 if not validation_result:
                     continue
 
@@ -648,7 +654,8 @@ def quality_check(data):
                         # Mark that at least one failure was found globally
                         any_failure_found_overall = True
 
-                        config = expectation_outcome.get("expectation_config", {})
+                        config = expectation_outcome.get(
+                            "expectation_config", {})
                         ge_name = config.get(
                             "expectation_type", "N/A_EXPECTATION_TYPE")
                         kwargs = config.get("kwargs", {})
@@ -739,9 +746,9 @@ def quality_check(data):
                 print("  Overall validation for this run is False, but no individual expectation failures were detailed in results (check suite-level issues or evaluation parameters).")
 
         if not any_failure_found_overall:
-            print("\nCongratulations! All expectations passed across all validation runs.")
+            print(
+                "\nCongratulations! All expectations passed across all validation runs.")
     print("="*30 + " END OF DETAILED REPORT " + "="*30 + "\n")
-
 
     all_checkpoint_result_dicts = [
         rd                                   # the dict itself
@@ -769,7 +776,6 @@ def quality_check(data):
 
     if not notnull_vars:
         print("WARNING: no NOT-NULL expectations found – phase summary will be empty")
-
 
     # ---------------------------------------------------------------------------
     # --- Generate Missing-value & Consistency summary per original_source -------
@@ -825,13 +831,11 @@ def quality_check(data):
     # ── 3.  Aggregate counts by datasource (the canonical one) ─────────────────
     ds_stats = {}   # datasource → counters
 
-
     def ds_record(src):
         return ds_stats.setdefault(
             src,
             {"Datasource": src, "Total": 0, "Missing": 0, "Mismatch": 0}
         )
-
 
     for var, (ec, uc) in var_counts.items():
         src = canonical_src.get(var, "UNKNOWN_SOURCE")
@@ -845,7 +849,8 @@ def quality_check(data):
     for rec in ds_stats.values():
         rec["Present"] = rec["Total"] - rec["Missing"]
         rec["MissingPercent"] = (
-            round(rec["Missing"] / rec["Total"] * 100, 2) if rec["Total"] else 0.0
+            round(rec["Missing"] / rec["Total"] *
+                  100, 2) if rec["Total"] else 0.0
         )
 
     # ── 5.  Persist to JSON so the UI can read it ──────────────────────────────
@@ -855,7 +860,6 @@ def quality_check(data):
 
     print(f"Datasource QC summary saved to: {ds_json}")
     # ---------------------------------------------------------------------------
-
 
     # --- Generate Variable‐level QC Summary ---
     print("\n--- Generating Aggregated Variable‐level QC Summary ---")
@@ -908,27 +912,25 @@ def quality_check(data):
 
     # 0️⃣  Normaliser helper must be in outer scope
 
-
     def _norm(txt: str) -> str:
         """lowercase, remove spaces/underscores/-, keep only alphanumerics"""
         return "".join(ch.lower() for ch in txt if ch.isalnum())
 
-
     # 1️⃣  Load importance map and normalise keys
     importance_file = os.path.join(os.path.dirname(suites_file),
-                                "variable_importance.json")
+                                   "variable_importance.json")
     importance_map = {}
     try:
         with open(importance_file, encoding="utf-8") as fh:
             raw_map = json.load(fh)
 
         # normalise keys like  Patient_sex  →  patientsex   (strip dot / underscore)
-        importance_map = {_norm(k.replace(".", "_"))                      : v for k, v in raw_map.items()}
+        importance_map = {_norm(k.replace(".", "_"))
+                                : v for k, v in raw_map.items()}
     except Exception as e:
         print(f"WARNING: could not load variable_importance.json: {e}")
 
     # 2️⃣  Helper: map Entity.variable → M/O/R
-
 
     def importance_of(col: str) -> str:
         """
@@ -941,7 +943,6 @@ def quality_check(data):
 
         short = col.split(".", 1)[1] if "." in col else col   # sex
         return importance_map.get(_norm(short), "Unknown")
-
 
     # 3️⃣  Aggregate using variable_qc dict created earlier
     group_stats = {
@@ -960,7 +961,8 @@ def quality_check(data):
 
     for rec in group_stats.values():
         if rec["Total"]:
-            rec["PercentagePass"] = round(rec["Passed"] / rec["Total"] * 100, 2)
+            rec["PercentagePass"] = round(
+                rec["Passed"] / rec["Total"] * 100, 2)
         else:
             rec["PercentagePass"] = None
 
@@ -973,7 +975,6 @@ def quality_check(data):
 
     print(f"Importance-group QC summary saved to: {importance_summary_path}")
     # ───────────────────────────────────────────────────────────────────────────
-
 
     # --- Generate QC (Expectation Name) Summary (Aggregated) ---
     print("\n--- Generating Aggregated QC (Expectation Name) Summary ---")
@@ -995,7 +996,8 @@ def quality_check(data):
 
                     result_details = expectation_outcome.get('result', {})
                     element_count = result_details.get('element_count', 0)
-                    unexpected_count = result_details.get('unexpected_count', 0)
+                    unexpected_count = result_details.get(
+                        'unexpected_count', 0)
 
                     if ge_name not in qc_summary_data:
                         qc_summary_data[ge_name] = {
@@ -1027,12 +1029,12 @@ def quality_check(data):
     try:
         with open(qc_summary_output_path, 'w') as f:
             json.dump(final_qc_summary_list, f, indent=4)
-        print(f"Aggregated QC-specific summary saved to: {qc_summary_output_path}")
+        print(
+            f"Aggregated QC-specific summary saved to: {qc_summary_output_path}")
     except Exception as e:
         print(f"Error saving aggregated QC-specific summary: {e}")
 
         # ---------------------------------------------------------------------------
-
 
     # --- Phase report: nearest Dx / Progression / Recurrence in time -----------
     print("\n--- Generating phase summary using temporal proximity -------------")
@@ -1056,7 +1058,8 @@ def quality_check(data):
 
         # --- quick look-ups ---------------------------------------------------
         epi_date_lookup = (
-            df_long_all[df_long_all.core_variable == "EpisodeEvent.dateOfEpisode"]
+            df_long_all[df_long_all.core_variable ==
+                        "EpisodeEvent.dateOfEpisode"]
             .set_index(["patient_id", "record_id"])["value"]
             .to_dict()
         )
@@ -1064,7 +1067,8 @@ def quality_check(data):
         # Sometimes a disease-status row has no episode date; we fall back to the
         # patient’s diagnosis date (earliest one in the file).
         diag_lookup = (
-            df_long_all[df_long_all.core_variable == "Diagnosis.dateOfDiagnosis"]
+            df_long_all[df_long_all.core_variable ==
+                        "Diagnosis.dateOfDiagnosis"]
             .sort_values("value")            # earliest first
             .drop_duplicates("patient_id")   # keep 1 / patient
             .set_index("patient_id")["value"]
@@ -1157,7 +1161,7 @@ def quality_check(data):
 
         for _, r in focus.iterrows():
             ph = r.phase                           # Diagnosis / Progression / Recurrence
-            
+
             phase_stats[ph]["Total"] += 1
             if pd.isna(r.value) or str(r.value).strip() == "":
                 phase_stats[ph]["Missing"] += 1
@@ -1166,7 +1170,7 @@ def quality_check(data):
             rec["Present"] = rec["Total"] - rec["Missing"]
             rec["MissingPercent"] = (
                 round(rec["Missing"] / rec["Total"] *
-                    100, 2) if rec["Total"] else 0.0
+                      100, 2) if rec["Total"] else 0.0
             )
 
         out_path = os.path.join(app_path, "phase_missingness_results.json")
@@ -1175,7 +1179,6 @@ def quality_check(data):
 
         print(f"Phase summary saved to: {out_path}")
     # ---------------------------------------------------------------------------
-
 
     # --- Phase × Entity presence summary ---------------------------------------
     # Creates phase_entity_results.json for the UI “By phase” tab
@@ -1186,7 +1189,8 @@ def quality_check(data):
     else:
         phase_entity = {}     # (entity_instance, phase) → present-counter
 
-        focus_rows = df_with_phase[df_with_phase.core_variable.isin(notnull_vars)]
+        focus_rows = df_with_phase[df_with_phase.core_variable.isin(
+            notnull_vars)]
 
         for _, r in focus_rows.iterrows():
             # entity name (e.g. "Surgery") + its record_id to keep instances separate
@@ -1213,7 +1217,8 @@ def quality_check(data):
 
         for _, r in focus_rows.iterrows():
             ent = r.core_variable.split('.')[0]          # Surgery / Biopsy / …
-            ent_inst = f"{ent}{r.record_id or ''}"            # Surgery1, Surgery2 …
+            # Surgery1, Surgery2 …
+            ent_inst = f"{ent}{r.record_id or ''}"
             key = (r.patient_id, ent_inst, r.phase)
 
             rec = patient_phase_entity.setdefault(
@@ -1245,7 +1250,6 @@ def quality_check(data):
             json.dump(list(patient_phase_entity.values()), fh, indent=4)
         print(f"Patient-entity-phase summary saved to: {out}")
 
-
     # --- Generate Dimension Summary (Aggregated) ---
     print("\n--- Generating Aggregated Dimension Summary ---")
     known_dimensions = ["Plausibility", "Conformance",
@@ -1265,7 +1269,8 @@ def quality_check(data):
                 for expectation_outcome in individual_expectation_results:
                     result_details = expectation_outcome.get('result', {})
                     element_count = result_details.get('element_count', 0)
-                    unexpected_count = result_details.get('unexpected_count', 0)
+                    unexpected_count = result_details.get(
+                        'unexpected_count', 0)
                     current_success = expectation_outcome.get('success', True)
 
                     if element_count == 0 and not current_success:
@@ -1282,7 +1287,8 @@ def quality_check(data):
 
                     expectation_meta = expectation_outcome.get(
                         'expectation_config', {}).get('meta', {})
-                    expectation_dimensions = expectation_meta.get('dimensions', [])
+                    expectation_dimensions = expectation_meta.get(
+                        'dimensions', [])
                     for dim in expectation_dimensions:
                         if dim in dimension_summary_data:
                             dimension_summary_data[dim]["Passed"] += current_passed_for_instance
@@ -1313,12 +1319,10 @@ def quality_check(data):
     except Exception as e:
         print(f"Error saving aggregated dimension-specific summary: {e}")
 
-
     # --- Generate Patient Summary (Aggregated) ---
     print("\n--- Generating Aggregated Patient Summary ---")
     # PatientID -> {Passed, Failed, Total, ...}
     patient_summary_data_aggregated = {}
-
 
     def ensure_patient_in_aggregated_summary(pid, summary_dict):
         pid_str = str(pid)
@@ -1328,13 +1332,13 @@ def quality_check(data):
                 "Total": 0, "PercentagePass": 0.0
             }
 
-
     # Process non-repeatable results
     if results_dict_main:  # This is checkpoint_result_main.to_json_dict()
         try:
             # df_non_rep_patients = pd.read_excel(
             #     FORMATED_FILEPATH_NON_REP, dtype=str)
-            df_non_rep_patients = read_table(FORMATED_FILEPATH_NON_REP, dtype=str)
+            df_non_rep_patients = read_table(
+                FORMATED_FILEPATH_NON_REP, dtype=str)
 
             if 'patient_id' in df_non_rep_patients.columns:
                 current_batch_patient_ids = df_non_rep_patients['patient_id'].astype(
@@ -1373,7 +1377,6 @@ def quality_check(data):
             print(
                 f"Error processing non-repeatable results for aggregated patient summary: {e}")
 
-
     # Process repeatable entity results
     if 'repeatable_entity_checkpoint_results' in locals() and 'repeatable_entity_dataframes' in locals():
         for entity_name, entity_results_dict in repeatable_entity_checkpoint_results.items():
@@ -1404,7 +1407,8 @@ def quality_check(data):
                             for failed_row_info in unexpected_indices:
                                 if isinstance(failed_row_info, dict):
                                     # Assumes patient_id is in index for repeatable
-                                    failed_pid = failed_row_info.get("patient_id")
+                                    failed_pid = failed_row_info.get(
+                                        "patient_id")
                                     if failed_pid is not None:
                                         patient_ids_who_failed_this_test.add(
                                             str(failed_pid))
@@ -1438,7 +1442,6 @@ def quality_check(data):
     except Exception as e:
         print(f"Error saving aggregated patient-specific summary: {e}")
 
-
     # ────────────────────────────────────────────────────────────────
     #  Patient  ×  Importance-group summary (High / Medium / Low)
     # ────────────────────────────────────────────────────────────────
@@ -1450,8 +1453,8 @@ def quality_check(data):
             # every variable is ‘tested’ for every patient once
             key = (pid, grp)
             rec = per_patient_imp.setdefault(key,
-                                            {"PatientID": pid, "Group": grp,
-                                            "Passed": 0, "Failed": 0, "Total": 0})
+                                             {"PatientID": pid, "Group": grp,
+                                              "Passed": 0, "Failed": 0, "Total": 0})
             rec["Total"] += stats["Total"]
             rec["Failed"] += stats["Failed"]
 
@@ -1462,7 +1465,7 @@ def quality_check(data):
 
     out = list(per_patient_imp.values())
     with open(os.path.join(app_path,
-            "patient_importance_summary_results.json"), "w") as fh:
+                           "patient_importance_summary_results.json"), "w") as fh:
         json.dump(out, fh, indent=4)
     print("Patient-importance summary written.")
 
@@ -1479,7 +1482,7 @@ def quality_check(data):
                 continue
             key = (r.patient_id, r.phase)
             rec = per_patient_phase.setdefault(key,
-                                            {"PatientID": r.patient_id, "Phase": r.phase,
+                                               {"PatientID": r.patient_id, "Phase": r.phase,
                                                 "Present": 0, "Missing": 0, "Total": 0})
             rec["Total"] += 1
             if pd.isna(r.value) or str(r.value).strip() == "":
@@ -1493,12 +1496,10 @@ def quality_check(data):
 
         out = list(per_patient_phase.values())
         with open(os.path.join(app_path,
-                "patient_phase_summary_results.json"), "w") as fh:
+                               "patient_phase_summary_results.json"), "w") as fh:
             json.dump(out, fh, indent=4)
         print("Patient-phase summary written.")
 
-
     print("Finished generating all reports and summaries.")
-
 
     return data, []

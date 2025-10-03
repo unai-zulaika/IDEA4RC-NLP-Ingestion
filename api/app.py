@@ -4,8 +4,10 @@ import logging
 import sqlite3
 import uuid
 import tempfile
+from sqlalchemy import create_engine
 
 import pandas as pd
+import numpy as np
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -13,6 +15,9 @@ from link_service.linking_service import link_rows
 from nlp.process_texts import process_texts
 from quality_checks.quality_check import quality_check
 import os
+import json
+import datetime as _dt
+
 
 app = FastAPI()
 
@@ -45,6 +50,63 @@ def init_db():
 
 
 init_db()
+
+
+def _cell_to_sql_scalar(x):
+    # None stays None
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return None
+
+    # Python datetime → ISO string
+    if isinstance(x, (_dt.datetime, _dt.date, _dt.time)):
+        # for dates with time keep full precision
+        if isinstance(x, _dt.datetime):
+            return x.strftime("%Y-%m-%d %H:%M:%S.%f")
+        if isinstance(x, _dt.date):
+            return x.strftime("%Y-%m-%d")
+        return x.strftime("%H:%M:%S")
+
+    # Pandas / NumPy datetimes
+    if isinstance(x, (pd.Timestamp, np.datetime64)):
+        ts = pd.to_datetime(x, errors="coerce")
+        return None if pd.isna(ts) else ts.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    # NumPy scalars → Python scalars
+    if isinstance(x, np.generic):
+        return x.item()
+
+    # Lists / tuples / sets / dicts → JSON string (or join if you prefer)
+    if isinstance(x, (list, tuple, set, dict)):
+        try:
+            return json.dumps(x, ensure_ascii=False)
+        except Exception:
+            return str(x)
+
+    # bytes → utf8
+    if isinstance(x, (bytes, bytearray)):
+        try:
+            return x.decode("utf-8")
+        except Exception:
+            return x.decode("latin-1", errors="ignore")
+
+    return x
+
+
+def sanitize_for_sqlite(df: pd.DataFrame) -> pd.DataFrame:
+    # Normalize dtypes that often cause trouble
+    df = df.copy()
+
+    # Convert datetime64 columns to strings
+    for c in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[c]):
+            df[c] = pd.to_datetime(df[c], errors="coerce").dt.strftime(
+                "%Y-%m-%d %H:%M:%S.%f")
+
+    # Map every cell to a SQL-safe scalar
+    for c in df.columns:
+        df[c] = df[c].map(_cell_to_sql_scalar)
+
+    return df
 
 
 def update_status(task_id: str, step: str, progress: int, result: str = ""):
@@ -90,9 +152,16 @@ def store_step_output(task_id: str, step_name: str, data: pd.DataFrame):
     """
     # Insert into DB here. For example:
     # db.insert(table="pipeline_results", dict={"task_id": task_id, "step_name": step_name, "data": data_json})
-    conn: sqlite3.Connection = sqlite3.connect("pipeline_status.db")
-    data.to_sql(f"{task_id}_{step_name}", con=conn, if_exists="replace", index=False)  # type: ignore
-    conn.close()
+    # conn: sqlite3.Connection = sqlite3.connect("pipeline_status.db")
+    engine = create_engine("sqlite:///pipeline_status.db",
+                           echo=False, future=True)
+
+    data = sanitize_for_sqlite(data)
+    data.to_sql(f"{task_id}_{step_name}", con=engine,
+                if_exists="replace", index=False)  # type: ignore
+    # conn.close()
+    engine.dispose()
+
 
 async def run_quality_check(data_file: bytes):
     """Function to run the quality check task asynchronously.
@@ -129,6 +198,7 @@ async def quality_check_call(
         "message": "Pipeline started! Use this task_id to check the status later.",
     }
 
+
 @app.get("/results/{task_id}/{step_name}")
 def get_step_results_as_excel(task_id: str, step_name: str):
     """
@@ -148,7 +218,8 @@ def get_step_results_as_excel(task_id: str, step_name: str):
         # Write the DataFrame to an Excel file in memory
         excel_data = io.BytesIO()
         with pd.ExcelWriter(excel_data, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Results")  # type: ignore
+            df.to_excel(writer, index=False,
+                        sheet_name="Results")  # type: ignore
         excel_data.seek(0)
 
         # Return the Excel file as a streaming response
@@ -164,6 +235,7 @@ def get_step_results_as_excel(task_id: str, step_name: str):
     finally:
         if conn is not None:
             conn.close()
+
 
 async def run_link_rows_task(task_id: str, data_file: bytes):
     """
@@ -198,6 +270,7 @@ async def run_link_rows_task(task_id: str, data_file: bytes):
         task_logger.error("Link-row task failed: %s", exc)
         raise
 
+
 @app.post("/run/link_rows")
 async def link_rows_call(
     file: UploadFile = File(...),
@@ -218,6 +291,7 @@ async def link_rows_call(
         "message": "link_rows started – poll /status/{task_id} for progress.",
     }
 
+
 async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
     """Function to run the pipeline task asynchronously.
 
@@ -235,8 +309,10 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         # Step 1: Load data
         update_status(task_id, "Loading data", 10)
         task_logger.info("Loading data from uploaded files.")
-        excel_data: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))  # type: ignore
-        free_texts: pd.DataFrame = pd.read_excel(io.BytesIO(text_file))  # type: ignore
+        excel_data: pd.DataFrame = pd.read_excel(
+            io.BytesIO(data_file))  # type: ignore
+        free_texts: pd.DataFrame = pd.read_excel(
+            io.BytesIO(text_file))  # type: ignore
 
         await asyncio.sleep(1)  # Simulate processing
 
@@ -263,7 +339,7 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         task_logger.info("Performing data quality checks.")
         # final_data, quality_report = quality_check(linked_data)
         quality_check(linked_data)
-        final_data = linked_data  
+        final_data = linked_data
         store_step_output(task_id, "quality_check", final_data)
 
         # Save result (simulate)
@@ -289,7 +365,8 @@ async def start_pipeline(
     text_content = await text_file.read()
 
     # Start the pipeline in the background
-    background_tasks.add_task(run_pipeline_task, task_id, data_content, text_content)
+    background_tasks.add_task(
+        run_pipeline_task, task_id, data_content, text_content)
 
     return {
         "task_id": task_id,
