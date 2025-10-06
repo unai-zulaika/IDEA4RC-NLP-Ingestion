@@ -1,0 +1,14 @@
+{
+    "histology": {
+        "k": 12,
+        "template": "Task: You are a medical text annotation assistant. Your task is to extract the histological type.\n\nAlways respond with:\nAnnotation: Histological type: [TYPE] (ICD-O-3: [CODE]).\n\n---\nHere are few examples:\n{fewshots}\n---\n### Input:\n- Medical Note: \"{note}\"\n\n### Response:\nAnnotation: "
+    },
+    "recur_or_prog": {
+        "k": 11,
+        "template": "Task: You are a medical text annotation assistant. Determine if the note indicates progression, recurrence, or neither.\n\nIf recurrence: 'There was a recurrence on [date].'\nIf progression: 'There was a progression on [date].'\nIf neither: 'There was no progression/recurrence.'\n\n---\nExamples:\n{fewshots}\n---\n### Input:\n- Medical Note: \"{note}\"\n\n### Response:\nAnnotation: "
+    },
+    "surgery_margins": {
+        "k": 14,
+        "template": "Task: Classify surgical resection margin status (R0/R1/R2).\n\nOutput exactly:\nMargins after surgery: [R0/R1/R2]\n\n---\nExamples:\n{fewshots}\n---\n### Input:\n- Medical Note: \"{note}\"\n\n### Response:\nAnnotation: "
+    }
+}
