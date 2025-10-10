@@ -1,5 +1,9 @@
 test_data/
 
+faiss_store/
+*.gguf
+*.Identifier
+
 results_ui/public/data/
 
 # Byte-compiled / optimized / DLL files

@@ -1,139 +1,155 @@
-# runners/llama_generic.py
-from typing import Callable, Dict, Any, Optional
-import pandas as pd
-from transformers import PreTrainedTokenizer
-from transformers import AutoModelForCausalLM, AutoTokenizer, AwqConfig
-from sentence_transformers import SentenceTransformer, util
-import torch
+# prompts_runtime.py
+import os
+import json
+import platform
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+
+try:
+    import pynvml
+except ImportError:
+    pynvml = None
+
+from llama_cpp import Llama
 
 
-class PromptTask:
-    def __init__(
-        self,
-        name: str,
-        # (fewshots_df, note_text) -> full prompt
-        build_prompt: Callable[[pd.DataFrame, str], str],
-        k_fewshots: int,
-    ):
-        self.name = name
-        self.build_prompt = build_prompt
-        self.k = k_fewshots
+# ---------- Global state (kept hot in production) ----------
+_LLM: Optional[Llama] = None
+_PROMPTS: Dict[str, Dict] = {}
 
 
-class LlamaPromptRunner:
-    """Generic, prompt-driven runner: the only thing that varies per task is the prompt."""
+# ---------- 1) Prompt loading & building ----------
+def load_prompts_from_json(json_path: str | Path) -> None:
+    """Load (or hot-reload) all prompt templates into memory."""
+    global _PROMPTS
+    with open(json_path, "r", encoding="utf-8") as f:
+        _PROMPTS = json.load(f)
 
-    def __init__(
-        self,
-        model,
-        tokenizer: PreTrainedTokenizer,
-        # pool for few-shot (already filtered)
-        train_df: pd.DataFrame,
-        embedder: SentenceTransformer,            # "all-MiniLM-L6-v2" as in your scripts
-        task: PromptTask,
-        device: str = "cuda",
-        max_ctx: int = 100000,
-        # temp, top_p, repetition_penalty...
-        gen_kwargs: Dict[str, Any] = None,
-    ):
-        self.model = model
-        self.tokenizer = tokenizer
-        self.train_df = train_df
-        self.embedder = embedder
-        self.task = task
-        self.device = device
-        self.max_ctx = max_ctx
-        self.gen_kwargs = gen_kwargs or dict(
-            max_new_tokens=100, use_cache=True, temperature=1.5, top_p=0.1, repetition_penalty=1.1)
+def get_prompt(task_key: str,
+               fewshots: List[Tuple[str, str]],  # list of (note_text, annotation)
+               note_text: str) -> str:
+    """
+    Build the final prompt string from the JSON template by key.
+    - fewshots: list of (note_text, annotation) pairs
+    - note_text: the incoming note to process
+    """
+    if task_key not in _PROMPTS:
+        raise KeyError(f"No prompt found for task '{task_key}'. "
+                       f"Known: {list(_PROMPTS.keys())}")
+    template = _PROMPTS[task_key]["template"]
 
-    def _fewshots(self, note_text: str) -> pd.DataFrame:
-        # same retrieval you already use everywhere
-        input_emb = self.embedder.encode([note_text])[0]
-        sims = []
-        for idx, row in self.train_df.iterrows():
-            tr = row["note_original_text"]
-            if tr.strip() == note_text.strip():
-                continue
-            tr_emb = self.embedder.encode([tr])[0]
-            sims.append((util.cos_sim(input_emb, tr_emb).item(), idx))
-        sims.sort(reverse=True, key=lambda x: x[0])
-        idxs = [i for _, i in sims[: self.task.k]]
-        return self.train_df.loc[idxs]
+    fewshots_text = "\n".join(
+        f"Example:\n- Medical Note: {n}\n- Annotation: {a}\n"
+        for (n, a) in fewshots
+    )
 
-    def predict_one(self, note_text: str) -> Dict[str, Any]:
-        few_df = self._fewshots(note_text)
-        prompt = self.task.build_prompt(few_df, note_text)
+    return template.format(fewshots=fewshots_text, note=note_text)
 
-        inputs = self.tokenizer(
-            [prompt], truncation=True, max_length=self.max_ctx - 100, return_tensors="pt").to(self.device)
-        out_ids = self.model.generate(**inputs, **self.gen_kwargs)
-        full = self.tokenizer.batch_decode(out_ids)[0]
 
-        # All your scripts extract the first line after "### Response:" and strip the leading "Annotation: "
+# ---------- 2) Model init (GPU → CPU fallback) & inference ----------
+def _default_threads() -> int:
+    env = os.getenv("LLAMA_N_THREADS")
+    if env and env.isdigit():
+        return int(env)
+    try:
+        import psutil
+        n = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or 4
+    except Exception:
+        n = os.cpu_count() or 4
+    return max(1, n - 1)
+
+def _detect_vram_gb() -> Optional[float]:
+    if pynvml is None:
+        return None
+    try:
+        pynvml.nvmlInit()
+        h = pynvml.nvmlDeviceGetHandleByIndex(0)
+        info = pynvml.nvmlDeviceGetMemoryInfo(h)
+        return float(info.total / (1024**3))
+    except Exception:
+        return None
+    finally:
         try:
-            line = full.split("### Response:\n", 1)[1].split("\n", 1)[0]
+            pynvml.nvmlShutdown()
         except Exception:
-            # fallback if newline is missing in some generations
-            line = full.split("### Response:", 1)[-1].strip().split("\n")[0]
-        normalized = line.replace("Annotation:", "").strip()
+            pass
 
-        return {"task": self.task.name, "raw": full, "normalized": normalized}
+def _pick_n_gpu_layers(model_layers: int = 32) -> int:
+    env = os.getenv("LLAMA_N_GPU_LAYERS")
+    if env is not None:
+        try:
+            return int(env)
+        except ValueError:
+            pass
+    if platform.system() == "Darwin":
+        return -1  # Metal build → request "all", runtime will cap
 
+    vram = _detect_vram_gb()
+    if vram is None:
+        return -1  # optimistically try all; fallback catches failures
+    if vram >= 6.0:
+        return -1
+    if vram >= 4.0:
+        return int(model_layers * 0.75)
+    if vram >= 2.5:
+        return int(model_layers * 0.33)
+    return 0
 
-# main
-if __name__ == "__main__":
-    # Example usage (you need to define model, tokenizer, train_df, embedder, and task)
-    # model = FastLanguageModel("path_to_model")
-    # tokenizer = PreTrainedTokenizer.from_pretrained("path_to_tokenizer")
-    # train_df = pd.read_csv("path_to_fewshot_data.csv")
-    # embedder = SentenceTransformer("all-MiniLM-L6-v2")
+def init_model(model_path: str,
+               n_ctx: int = 4096,
+               model_layers: int = 32) -> None:
+    """
+    Initialize a global Llama() instance once (keep it hot).
+    Tries GPU offload first, falls back to CPU.
+    """
+    global _LLM
+    if _LLM is not None:
+        return  # already initialized
 
-    # def build_prompt(fewshots_df: pd.DataFrame, note_text: str) -> str:
-    #     # Implement your prompt building logic here
-    #     prompt = "### Few-shot examples:\n"
-    #     for _, row in fewshots_df.iterrows():
-    #         prompt += f"Input: {row['note_original_text']}\nOutput: {row['annotation']}\n\n"
-    #     prompt += f"### New input:\nInput: {note_text}\nOutput:"
-    #     return prompt
+    n_threads = _default_threads()
+    try_gpu = _pick_n_gpu_layers(model_layers=model_layers)
 
-    # task = PromptTask(name="ExampleTask",
-    #                   build_prompt=build_prompt, k_fewshots=3)
+    for n_gpu_layers in ([try_gpu] if try_gpu == 0 else [try_gpu, 0]):
+        try:
+            print(f"[llama.cpp] init n_gpu_layers={n_gpu_layers}, n_threads={n_threads}")
+            _LLM = Llama(
+                model_path=model_path,
+                n_ctx=n_ctx,
+                n_threads=n_threads,
+                n_batch=512,
+                n_gpu_layers=n_gpu_layers,   # -1: all, 0: CPU
+                verbose=False,
+            )
+            print("[llama.cpp] model ready")
+            return
+        except Exception as e:
+            print(f"[llama.cpp] init failed (n_gpu_layers={n_gpu_layers}): {e}")
+            _LLM = None
+    raise RuntimeError("Could not initialize llama.cpp (GPU+CPU both failed).")
 
-    # runner = LlamaPromptRunner(model, tokenizer, train_df, embedder, task)
+def run_model_with_prompt(prompt: str,
+                          max_new_tokens: int = 128,
+                          temperature: float = 0.7) -> Dict[str, str]:
+    """
+    Run the (already-initialized) LLM on a ready-to-go prompt string.
+    Returns {"raw": full_text, "normalized": first_line_after_response}.
+    """
+    if _LLM is None:
+        raise RuntimeError("Model not initialized. Call init_model(...) first.")
 
-    # note = "Your input text here."
-    # result = runner.predict_one(note)
-    # print(result)
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-    import torch
-
-    model_id = "unsloth/Meta-Llama-3.1-8B-Instruct"  # non-AWQ repo
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=True, bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16
+    out = _LLM.create_chat_completion(
+        messages=[
+            {"role": "system", "content": "You are a concise medical text annotation assistant."},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=max_new_tokens,
+        temperature=temperature,
     )
+    raw = out["choices"][0]["message"]["content"]
+    
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, device_map="cpu", dtype=torch.bfloat16, quantization_config=bnb
-    )
+    # Normalize: extract the first line (your prompts end with "Annotation: ")
+    # If you prefer to split by "### Response:", do it here.
+    first_line = raw.strip().splitlines()[0].strip()
 
-    messages = [
-        {"role": "system", "content": "You are a helpful assistant that responds as a pirate."},
-        {"role": "user", "content": "What's Deep Learning?"},
-    ]
-
-    inputs = tokenizer.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_tensors="pt",
-        return_dict=True,
-    ).to(model.device)
-
-    with torch.no_grad():
-        outputs = model.generate(**inputs, do_sample=True, max_new_tokens=256)
-
-    print(tokenizer.batch_decode(
-        outputs[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True
-    )[0])
+    return {"raw": raw, "normalized": first_line}

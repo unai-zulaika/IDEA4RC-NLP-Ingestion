@@ -18,6 +18,10 @@ import os
 import json
 import datetime as _dt
 
+# Keep status/logs separate from large result tables to avoid locks
+STATUS_DB = "pipeline_status.db"
+RESULTS_DB = "pipeline_results.db"
+
 
 app = FastAPI()
 
@@ -33,7 +37,7 @@ app.add_middleware(
 
 def init_db():
     """Initialize SQLite database for pipeline status."""
-    conn = sqlite3.connect("pipeline_status.db")
+    conn = sqlite3.connect(STATUS_DB)
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -45,6 +49,10 @@ def init_db():
         )
     """
     )
+    # Enable WAL so readers don't block on writers
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
+    cursor.execute("PRAGMA busy_timeout=5000;")
     conn.commit()
     conn.close()
 
@@ -113,7 +121,7 @@ def update_status(task_id: str, step: str, progress: int, result: str = ""):
     """
     Update the pipeline status in the database.
     """
-    conn = sqlite3.connect("pipeline_status.db")
+    conn = sqlite3.connect(STATUS_DB, timeout=5)
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -130,7 +138,7 @@ def get_status_from_db(task_id: str):
     """
     Retrieve the pipeline status from the database.
     """
-    conn = sqlite3.connect("pipeline_status.db")
+    conn = sqlite3.connect(STATUS_DB, timeout=5)
     cursor = conn.cursor()
     cursor.execute(
         "SELECT step, progress, result FROM pipeline_status WHERE task_id = ?",
@@ -150,52 +158,99 @@ def store_step_output(task_id: str, step_name: str, data: pd.DataFrame):
     """
     Save data to the database after each pipeline step.
     """
-    # Insert into DB here. For example:
-    # db.insert(table="pipeline_results", dict={"task_id": task_id, "step_name": step_name, "data": data_json})
-    # conn: sqlite3.Connection = sqlite3.connect("pipeline_status.db")
-    engine = create_engine("sqlite:///pipeline_status.db",
-                           echo=False, future=True)
+    # Use a separate DB for bulky results to reduce contention with STATUS_DB
+    engine = create_engine(
+        f"sqlite:///{RESULTS_DB}",
+        echo=False,
+        future=True,
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+    # Put results DB in WAL as well
+    with engine.begin() as conn:
+        conn.exec_driver_sql("PRAGMA journal_mode=WAL;")
+        conn.exec_driver_sql("PRAGMA synchronous=NORMAL;")
+        conn.exec_driver_sql("PRAGMA busy_timeout=5000;")
 
     data = sanitize_for_sqlite(data)
     data.to_sql(f"{task_id}_{step_name}", con=engine,
                 if_exists="replace", index=False)  # type: ignore
-    # conn.close()
     engine.dispose()
 
 
-async def run_quality_check(data_file: bytes):
-    """Function to run the quality check task asynchronously.
-
-    Args:
-        data_file (bytes): _description_
+async def run_quality_check_task(task_id: str, data_file: bytes):
     """
-    # 1) read into DF
-    df = pd.read_excel(io.BytesIO(data_file))
+    Background job: run quality_check on a single uploaded spreadsheet.
+    Stores output so it can be fetched later via /results/{task_id}/quality_check.
+    """
+    task_logger = get_task_logger(task_id)
+    try:
+        update_status(task_id, "Initializing", 0)
+        task_logger.info("Quality-check task initialised.")
 
-    # 2) write to a temporary Excel file
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_path = os.path.join(tmpdir, "input.xlsx")
-        df.to_excel(tmp_path, index=False)
+        # Load the uploaded file (off main loop)
+        update_status(task_id, "Loading data", 10)
+        # type: ignore
+        df: pd.DataFrame = await asyncio.to_thread(pd.read_excel, io.BytesIO(data_file))
+        task_logger.info("File read into DataFrame (shape=%s).", df.shape)
 
-        # 3) call your core function, passing the path
-        quality_check(
-            tmp_path,
-        )
+        # Run quality check (off main loop)
+        update_status(task_id, "Running quality check", 60)
+        task_logger.info("Invoking quality_check() on DataFrame.")
+        final_df: pd.DataFrame | None = None
+
+        try:
+            # prefer DF input
+            qc_result = await asyncio.to_thread(quality_check, df)
+        except TypeError:
+            task_logger.info(
+                "quality_check(df) incompatible. Falling back to file path.")
+
+            def _run_qc_on_tmp(_df: pd.DataFrame):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_path = os.path.join(tmpdir, "input.xlsx")
+                    _df.to_excel(tmp_path, index=False)
+                    return quality_check(tmp_path)
+            qc_result = await asyncio.to_thread(_run_qc_on_tmp, df)
+
+        if isinstance(qc_result, pd.DataFrame):
+            final_df = qc_result
+        elif isinstance(qc_result, tuple):
+            for item in qc_result:
+                if isinstance(item, pd.DataFrame):
+                    final_df = item
+                    break
+
+        if final_df is None:
+            task_logger.info(
+                "quality_check returned no DataFrame. Using input as output.")
+            final_df = df
+
+        update_status(task_id, "Saving results", 90)
+        await asyncio.to_thread(store_step_output, task_id, "quality_check", final_df)
+
+        update_status(task_id, "Completed", 100, "Quality-check finished.")
+        task_logger.info(
+            "Quality-check task completed successfully (shape=%s).", final_df.shape)
+    except Exception as exc:
+        update_status(task_id, "Failed", 100, str(exc))
+        task_logger.error("Quality-check task failed: %s", exc)
+        raise
 
 
 @app.post("/run/quality_check")
 async def quality_check_call(
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     task_id = str(uuid.uuid4())
     data_content = await file.read()
 
-    # Start the pipeline in the background
-    await run_quality_check(data_content)
+    # Start the task in the background
+    background_tasks.add_task(run_quality_check_task, task_id, data_content)
 
     return {
         "task_id": task_id,
-        "message": "Pipeline started! Use this task_id to check the status later.",
+        "message": "quality_check started – poll /status/{task_id} for progress.",
     }
 
 
@@ -206,7 +261,8 @@ def get_step_results_as_excel(task_id: str, step_name: str):
     """
     conn = None
     try:
-        conn = sqlite3.connect("pipeline_status.db")
+        conn = sqlite3.connect(RESULTS_DB, timeout=5)
+        conn.execute("PRAGMA busy_timeout=5000;")
         query = f'SELECT * FROM "{task_id}_{step_name}"'
         df: pd.DataFrame = pd.read_sql(query, conn)  # type: ignore
 
@@ -249,20 +305,16 @@ async def run_link_rows_task(task_id: str, data_file: bytes):
         update_status(task_id, "Initializing", 0)
         task_logger.info("Link-row task initialised.")
 
-        # Load the uploaded file
         update_status(task_id, "Loading data", 10)
-        df: pd.DataFrame = pd.read_excel(io.BytesIO(data_file))          # noqa
+        df: pd.DataFrame = await asyncio.to_thread(pd.read_excel, io.BytesIO(data_file))  # noqa
         task_logger.info("File read into DataFrame (shape=%s).", df.shape)
 
-        # Run linking
         update_status(task_id, "Linking rows", 60)
-        linked_df: pd.DataFrame = link_rows(df)                          # noqa
+        linked_df: pd.DataFrame = await asyncio.to_thread(link_rows, df)  # noqa
         task_logger.info("link_rows complete (shape=%s).", linked_df.shape)
 
-        # Persist result so the existing /results route can serve it
-        store_step_output(task_id, "linked_data", linked_df)
+        await asyncio.to_thread(store_step_output, task_id, "linked_data", linked_df)
 
-        # Mark done
         update_status(task_id, "Completed", 100, "Link-rows finished.")
         task_logger.info("Link-row task completed successfully.")
     except Exception as exc:
@@ -306,46 +358,34 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes):
         update_status(task_id, "Initializing", 0)
         task_logger.info("Pipeline initialization started.")
 
-        # Step 1: Load data
         update_status(task_id, "Loading data", 10)
         task_logger.info("Loading data from uploaded files.")
-        excel_data: pd.DataFrame = pd.read_excel(
-            io.BytesIO(data_file))  # type: ignore
-        free_texts: pd.DataFrame = pd.read_excel(
-            io.BytesIO(text_file))  # type: ignore
+        # type: ignore
+        excel_data: pd.DataFrame = await asyncio.to_thread(pd.read_excel, io.BytesIO(data_file))
+        # type: ignore
+        free_texts: pd.DataFrame = await asyncio.to_thread(pd.read_excel, io.BytesIO(text_file))
 
-        await asyncio.sleep(1)  # Simulate processing
-
-        # Step 2: Process free texts
+        # Step 2: Process free texts (off main loop)
         update_status(task_id, "Processing free texts", 30)
         task_logger.info("Processing free texts and structuring data.")
-        structured_data = process_texts(free_texts, excel_data)
-        store_step_output(task_id, "processed_texts", structured_data)
-
-        await asyncio.sleep(1)
+        structured_data = await asyncio.to_thread(process_texts, free_texts, excel_data)
+        await asyncio.to_thread(store_step_output, task_id, "processed_texts", structured_data)
 
         # Step 3: Link rows
         update_status(task_id, "Linking rows", 60)
         task_logger.info("Linking rows based on criteria.")
-        # linked_data = link_rows(structured_data, linking_criteria={"by_date": True})
-        linked_data = link_rows(structured_data)
-
-        store_step_output(task_id, "linked_data", linked_data)
-
-        await asyncio.sleep(1)
+        linked_data = await asyncio.to_thread(link_rows, structured_data)
+        await asyncio.to_thread(store_step_output, task_id, "linked_data", linked_data)
 
         # Step 4: Data quality check
         update_status(task_id, "Performing data quality checks", 90)
         task_logger.info("Performing data quality checks.")
-        # final_data, quality_report = quality_check(linked_data)
-        quality_check(linked_data)
+        await asyncio.to_thread(quality_check, linked_data)
         final_data = linked_data
-        store_step_output(task_id, "quality_check", final_data)
+        await asyncio.to_thread(store_step_output, task_id, "quality_check", final_data)
 
-        # Save result (simulate)
-        update_status(
-            task_id, "Completed", 100, result="Pipeline completed successfully!"
-        )
+        update_status(task_id, "Completed", 100,
+                      result="Pipeline completed successfully!")
         task_logger.info("Pipeline completed successfully.")
     except Exception as e:
         update_status(task_id, "Failed", 100, result=str(e))
@@ -380,7 +420,10 @@ async def get_status(task_id: str):
     status = get_status_from_db(task_id)
     if not status:
         raise HTTPException(status_code=404, detail="Task ID not found.")
-    return status
+    # Always return a quick, non-blocking status with running flag
+    is_running = status["step"] not in ("Completed", "Failed") and (
+        status["progress"] is None or status["progress"] < 100)
+    return {**status, "is_running": bool(is_running)}
 
 
 @app.get("/logs/{task_id}")
@@ -414,7 +457,7 @@ async def get_logs(task_id: str):
 
 # Initialize SQLite database for logs
 def init_logs_db():
-    conn = sqlite3.connect("pipeline_status.db")
+    conn = sqlite3.connect(STATUS_DB)
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -427,6 +470,9 @@ def init_logs_db():
         )
     """
     )
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
+    cursor.execute("PRAGMA busy_timeout=5000;")
     conn.commit()
     conn.close()
 
@@ -438,7 +484,7 @@ def log_message(task_id: str, log_level: str, message: str):
     """
     Save a log message to the database.
     """
-    conn = sqlite3.connect("pipeline_status.db")
+    conn = sqlite3.connect(STATUS_DB, timeout=5)
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -463,12 +509,17 @@ class DBLogHandler(logging.Handler):
         self.task_id = task_id
 
     def emit(self, record):
-        log_message(self.task_id, record.levelname, record.msg)
+        # Use formatted message to include args, avoid raw record.msg
+        log_message(self.task_id, record.levelname, record.getMessage())
 
 
 # Example: Add DBLogHandler to logger dynamically
 def get_task_logger(task_id: str):
     task_logger = logging.getLogger(f"pipeline_{task_id}")
     task_logger.setLevel(logging.DEBUG)
-    task_logger.addHandler(DBLogHandler(task_id))
+    # Avoid adding duplicate handlers for the same task_id
+    if not any(isinstance(h, DBLogHandler) and getattr(h, "task_id", None) == task_id for h in task_logger.handlers):
+        task_logger.addHandler(DBLogHandler(task_id))
+    # Prevent duplicate propagation to root loggers
+    task_logger.propagate = False
     return task_logger

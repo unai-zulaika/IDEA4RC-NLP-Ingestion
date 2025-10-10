@@ -1,0 +1,9 @@
+core_variable,value,patient_id,original_source,date_ref,record_id,types,note_id,prompt_type
+Surgery.marginsAfterSurgery,R,1,NLP_LLM,2023-10-01,0,CodeableConcept,101.0,surgery_margins
+,"('therapeutic (without surgery)', '[select intent]', '[provide date]', '[select')",1,NLP_LLM,2023-10-01,1,CodeableConcept,101.0,oncology_treatment
+,"('therapeutic (without surgery)', '[select intent]', '[provide date]', '[select')",1,NLP_LLM,2023-10-01,2,CodeableConcept,101.0,oncology_treatment
+,"('[biopsy type]', '[put date]', 't')",1,NLP_LLM,2023-10-01,3,CodeableConcept,101.0,tumor_biopsy_type
+Surgery.marginsAfterSurgery,R,2,NLP_LLM,2023-10-02,4,CodeableConcept,102.0,surgery_margins
+,"('therapeutic (without surgery)', '[select intent]', '[provide date]', '[select')",2,NLP_LLM,2023-10-02,5,CodeableConcept,102.0,oncology_treatment
+,"('therapeutic (without surgery)', '[select intent]', '[provide date]', '[select')",2,NLP_LLM,2023-10-02,6,CodeableConcept,102.0,oncology_treatment
+,"('[biopsy type]', '[put date]', 't')",2,NLP_LLM,2023-10-02,7,CodeableConcept,102.0,tumor_biopsy_type
