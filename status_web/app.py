@@ -3,13 +3,31 @@ import requests
 import time
 import os
 
-st.set_page_config(page_title='IDEA4RC data ingestion', page_icon="LogoIDEA4RC-300x200.jpg", layout="wide")
-# st.set_page_config(page_title='IDEA4RC data ingestion', page_icon=favicon) # , page_icon = favicon, layout = 'wide', initial_sidebar_state = 'auto')
+st.set_page_config(page_title='IDEA4RC data ingestion',
+                   page_icon="LogoIDEA4RC-300x200.jpg", layout="wide")
+
+# Persistent store for last task across reruns/refreshes (server-side)
+
+
+@st.cache_resource
+def _persistent_store():
+    return {"last_task_id": None}
+
+
+_store = _persistent_store()
 
 st.title("IDEA4RC Data Ingestion")
 
 ETL_HOST = os.getenv("ETL_HOST", "localhost:4001")
 RESULTS_UI_HOST = os.getenv("RESULTS_UI_HOST", "localhost:5173")
+
+# Define API host early so it's available to the "Last run" block
+mode = os.getenv("API_HOST", "localhost:8000")
+
+
+def _api(path: str) -> str:
+    return f"http://{mode}{path}"
+
 
 st.write(
     """
@@ -29,22 +47,63 @@ st.write(
     """
 )
 
+# --- Last run quick controls (always visible) ---
+st.markdown("### Last run")
+_last_task_id = st.session_state.get("task_id") or _store.get("last_task_id")
+
+if _last_task_id:
+    cols = st.columns([3, 2, 2, 2])
+    with cols[0]:
+        st.write(f"Task ID: {_last_task_id}")
+        try:
+            resp = requests.get(_api(f"/status/{_last_task_id}"), timeout=5)
+            if resp.status_code == 200:
+                s = resp.json()
+                st.write(f"Step: {s['step']} | Progress: {s['progress']}%")
+            else:
+                st.warning(resp.json().get("detail", "Status unavailable"))
+        except Exception as e:
+            st.warning(f"Status error. Backend {mode} not reachable: {e}")
+    with cols[1]:
+        if st.button("Refresh Status", key="refresh_last_status"):
+            pass  # triggers a rerun
+    with cols[2]:
+        if st.button("Cancel", key="cancel_last"):
+            try:
+                r = requests.post(_api(f"/cancel/{_last_task_id}"), timeout=5)
+                if r.status_code == 200:
+                    st.success(r.json().get(
+                        "message", "Cancellation requested."))
+                else:
+                    st.error(r.json().get("detail", "Cancel failed."))
+            except Exception as e:
+                st.error(f"Cancel failed. Backend {mode} not reachable: {e}")
+    with cols[3]:
+        if st.button("Force Kill", key="kill_last"):
+            try:
+                r = requests.post(_api(f"/kill/{_last_task_id}"), timeout=5)
+                if r.status_code == 200:
+                    st.success(r.json().get("message", "Force kill sent."))
+                else:
+                    st.error(r.json().get("detail", "Force kill failed."))
+            except Exception as e:
+                st.error(
+                    f"Force kill failed. Backend {mode} not reachable: {e}")
+else:
+    st.info("No previous run found. Start a task to see it here.")
+
 st.title("_OPTION 1_ :blue[Full process]")
 
 st.write(
     """
     _Upload the normalized table and the free texts, then click on 'Start pipeline' to start the process._\n
     This option will run the full pipeline, including text processing, data linking, and quality checks.\n
-    You can check the status of the pipeline and download the results at any time.\n 
+    You can check the status of the pipeline and download the results at any time.\n
     If you want to run only the quality checks, please use the option below.\n
     If you want to run only the ETL, please use the option below.\n
     THIS IS THE RECOMMENDED OPTION FOR Point of Injection 1.
     """
 )
-
-# mode = "localhost"
-# mode = "backend"
-mode = os.getenv("API_HOST", "localhost:8000")  # Default to localhost if not set
 
 # Initialize session state
 if "task_id" not in st.session_state:
@@ -52,136 +111,218 @@ if "task_id" not in st.session_state:
 
 # File upload section
 uploaded_excel = st.file_uploader(
-    "Upload an Excel file with the structured data", type=["xlsx"], key="excel_uploader"
+    "Upload a file with the structured data (Excel or CSV)", type=["xlsx", "csv"], key="excel_uploader"
 )
 uploaded_text = st.file_uploader(
-    "Upload an Excel file with the patients text", type=["xlsx"], key="text_uploader"
+    "Upload a file with the patients text (Excel or CSV)", type=["xlsx", "csv"], key="text_uploader"
 )
 
-if uploaded_excel and uploaded_text:
-    if st.button("Start Pipeline"):
-        # Prepare files for API
-        files = {
-            "data_file": (
-                "data.xlsx",
-                uploaded_excel.getvalue(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ),
-            "text_file": ("text.xlsx",
-                uploaded_text.getvalue(),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",),
-        }
-        # Start the pipeline
-        response = requests.post(f"http://{mode}/pipeline", files=files)
-        if response.status_code == 200:
-            st.session_state.task_id = response.json()["task_id"]
-            st.success(f"Pipeline started! Task ID: {st.session_state.task_id}")
-            st.info("Save this Task ID to check the status later.")
-        else:
-            st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+# Always render the button; disable until files are present
+start_clicked = st.button(
+    "Start Pipeline",
+    key="btn_start_pipeline",
+    disabled=not (uploaded_excel and uploaded_text),
+)
+if start_clicked:
+    # Prepare files for API
+    data_mime = "text/csv" if uploaded_excel.name.endswith(
+        '.csv') else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    text_mime = "text/csv" if uploaded_text.name.endswith(
+        '.csv') else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+    files = {
+        "data_file": (
+            uploaded_excel.name,
+            uploaded_excel.getvalue(),
+            data_mime,
+        ),
+        "text_file": (
+            uploaded_text.name,
+            uploaded_text.getvalue(),
+            text_mime,
+        ),
+    }
+    # Start the pipeline
+    response = requests.post(_api("/pipeline"), files=files, timeout=30)
+    if response.status_code == 200:
+        st.session_state.task_id = response.json()["task_id"]
+        _store["last_task_id"] = st.session_state.task_id  # persist last
+        st.success(f"Pipeline started! Task ID: {st.session_state.task_id}")
+        st.info("Save this Task ID to check the status later.")
+    else:
+        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
-#### ONLY FROM LINKING ONWARDS
+# Show a cancel button for the current (most recently started) task if any
+if st.session_state.task_id:
+    with st.expander("Current Task Controls", expanded=True):
+        st.write(f"Current Task ID: {st.session_state.task_id}")
+        cols = st.columns(2)
+        with cols[0]:
+            if st.button("Cancel This Task", key="cancel_current_pipeline"):
+                try:
+                    resp = requests.post(
+                        _api(f"/cancel/{st.session_state.task_id}"), timeout=5)
+                    if resp.status_code == 200:
+                        st.success(resp.json().get(
+                            "message", "Cancellation requested."))
+                    else:
+                        st.error(resp.json().get(
+                            "detail", "Failed to request cancellation."))
+                except Exception as e:
+                    st.error(
+                        f"Cancellation call failed. Backend {mode} not reachable: {e}")
+        with cols[1]:
+            if st.button("Force Kill Task", key="kill_current_pipeline"):
+                try:
+                    resp = requests.post(
+                        _api(f"/kill/{st.session_state.task_id}"), timeout=5)
+                    if resp.status_code == 200:
+                        st.success(resp.json().get(
+                            "message", "Force kill sent."))
+                    else:
+                        st.error(resp.json().get(
+                            "detail", "Failed to force kill."))
+                except Exception as e:
+                    st.error(
+                        f"Force kill call failed. Backend {mode} not reachable: {e}")
 
 # ─── OPTION 2 : linking service only ───────────────────────────────────────────
-
 st.divider()
 st.title("_OPTION 2_ :blue[Run the linking service]")
 
 uploaded_linking_file = st.file_uploader(
-    "Upload a file to run the linking service",
-    type=["xlsx"],
+    "Upload a file to run the linking service (Excel or CSV)",
+    type=["xlsx", "csv"],
     key="linking_file_uploader",
 )
 
-if uploaded_linking_file and st.button("Execute Linking Service"):
-    # kick off the background job
+link_btn = st.button(
+    "Execute Linking Service",
+    key="btn_linking",
+    disabled=uploaded_linking_file is None,
+)
+if link_btn:
+    link_mime = "text/csv" if uploaded_linking_file.name.endswith(
+        '.csv') else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     files = {
         "file": (
             uploaded_linking_file.name,
             uploaded_linking_file.getvalue(),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            link_mime,
         )
     }
-    resp = requests.post(f"http://{mode}/run/link_rows", files=files)
+    resp = requests.post(_api("/run/link_rows"), files=files, timeout=30)
 
     if resp.status_code != 200:
-        st.error(f"Error: {resp.json().get('detail', 'Unknown error')}")
+        st.error(resp.json().get("detail", "Failed to start linking service."))
         st.stop()
 
     task_id = resp.json()["task_id"]
+    st.session_state.task_id = task_id  # remember for cancel controls
+    _store["last_task_id"] = task_id    # persist last
     st.info(f"Task started (ID {task_id}). This usually finishes in 5-30 s…")
 
     # simple polling loop with a progress bar
     bar = st.progress(0, text="Linking rows…")
     step = ""
-    while step not in ("Completed", "Failed"):
-        time.sleep(2)
-        status = requests.get(f"http://{mode}/status/{task_id}").json()
+    while step not in ("Completed", "Failed", "Cancelled"):
+        time.sleep(1)
+        status = requests.get(_api(f"/status/{task_id}"), timeout=5).json()
         bar.progress(status["progress"], text=status["step"])
         step = status["step"]
 
-    bar.empty()  # remove the progress bar
+    bar.empty()
 
     if step == "Failed":
-        st.error(f"Link-rows job failed: {status.get('result', 'no message')}")
+        st.error(f"Linking failed: {status.get('result', 'no message')}")
         st.stop()
 
-    # job is done → fetch the real workbook
-    result = requests.get(
-        f"http://{mode}/results/{task_id}/linked_data"
-    )
+    result = requests.get(_api(f"/results/{task_id}/linked_data"), timeout=30)
     if result.status_code != 200:
         st.error(
-            f"Finished but couldn’t fetch result: "
+            f"Finished but couldn't fetch result: "
             f"{result.json().get('detail', 'Unknown error')}"
         )
         st.stop()
 
-    st.success("Linking service completed – download the workbook below:")
+    st.success("Linking service completed – download the CSV below:")
     st.download_button(
-        label="Download Linking Service Result",
+        label="Download Linking Service Result (CSV)",
         data=result.content,
-        file_name=f"{task_id}_linked_data.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        file_name=f"{task_id}_linked_data.csv",
+        mime="text/csv",
     )
 
-
-
-
-#### ONLY QUALITY CHECKS
-
+# ─── OPTION 3 : just quality checks ────────────────────────────────────────────
 st.divider()
 st.title("_OPTION 3_ :blue[Just quality checks]")
 
 st.write("### Run Quality Check on a File")
 
 uploaded_qc_file = st.file_uploader(
-    "Upload a file to run quality check", type=["xlsx"], key="qc_file_uploader"
+    "Upload a file to run quality check (Excel or CSV)", type=["xlsx", "csv"], key="qc_file_uploader"
 )
 
-if uploaded_qc_file and st.button("Execute Quality Check"):
+qc_btn = st.button(
+    "Execute Quality Check",
+    key="btn_qc",
+    disabled=uploaded_qc_file is None,
+)
+if qc_btn:
+    qc_mime = "text/csv" if uploaded_qc_file.name.endswith(
+        '.csv') else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     files = {
         "file": (
             uploaded_qc_file.name,
             uploaded_qc_file.getvalue(),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            qc_mime,
         )
     }
-    response = requests.post(f"http://{mode}/run/quality_check", files=files)
+    resp = requests.post(_api("/run/quality_check"), files=files, timeout=30)
 
-    if response.status_code == 200:
-        st.success("Quality check completed successfully. Download result below:")
-        st.download_button(
-            label="Download Quality Check Result",
-            data=response.content,
-            file_name=f"quality_check_result.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    if resp.status_code != 200:
+        st.error(resp.json().get(
+            "detail", "Failed to start quality check."))
+        st.stop()
+
+    task_id = resp.json()["task_id"]
+    st.session_state.task_id = task_id
+    _store["last_task_id"] = task_id
+    st.info(
+        f"Quality check started (ID {task_id}). This usually finishes in 30–60 s…")
+
+    bar = st.progress(0, text="Running quality checks…")
+    step = ""
+    while step not in ("Completed", "Failed", "Cancelled"):
+        time.sleep(1)
+        status = requests.get(_api(f"/status/{task_id}"), timeout=5).json()
+        bar.progress(status["progress"], text=status["step"])
+        step = status["step"]
+
+    bar.empty()
+
+    if step == "Failed":
+        st.error(f"Quality check failed: {status.get('result', 'no message')}")
+        st.stop()
+
+    result = requests.get(
+        _api(f"/results/{task_id}/quality_check"), timeout=30)
+    if result.status_code != 200:
+        st.error(
+            f"Finished but couldn't fetch result: "
+            f"{result.json().get('detail', 'Unknown error')}"
         )
-    else:
-        st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
+        st.stop()
 
-#### SEE data quality
+    st.success("Quality check completed – download the CSV below:")
+    st.download_button(
+        label="Download Quality Check Result (CSV)",
+        data=result.content,
+        file_name=f"{task_id}_quality_check.csv",
+        mime="text/csv",
+    )
+
+# SEE data quality
 
 # Initialize state only once
 if "data_quality_report" not in st.session_state:
@@ -201,8 +342,7 @@ if st.session_state.data_quality_report:
         height=1000
     )
 
-#### SKIP ALL STEPS AND RUN ETL
-
+# ─── OPTION 4 : ETL ───────────────────────────────────────────────────────────
 st.divider()
 st.title("_OPTION 4_ :blue[Run ETL]")
 
@@ -212,7 +352,12 @@ uploaded_etl_file = st.file_uploader(
     "Upload a file to run ETL", type=["xlsx", "csv"], key="etl_file_uploader"
 )
 
-if uploaded_etl_file and st.button("Execute ETL"):
+etl_btn = st.button(
+    "Execute ETL",
+    key="btn_etl",
+    disabled=uploaded_etl_file is None,
+)
+if etl_btn:
     files = {
         "dataFile": (
             uploaded_etl_file.name,
@@ -221,15 +366,18 @@ if uploaded_etl_file and st.button("Execute ETL"):
         )
     }
     try:
-        upload_response = requests.post(f"http://{ETL_HOST}/etl/upload", files=files)
+        upload_response = requests.post(
+            f"http://{ETL_HOST}/etl/upload", files=files)
         if upload_response.status_code == 200:
             st.success("Final file successfully uploaded!")
         else:
-            st.error(f"Upload failed with status code {upload_response.status_code}")
+            st.error(
+                f"Upload failed with status code {upload_response.status_code}")
     except Exception as e:
         st.error(f"Upload failed: {e}")
 
-    response = requests.post(f"http://{mode}/results/quality_check", files=files)
+    response = requests.post(
+        f"http://{mode}/results/quality_check", files=files)
 
     if response.status_code == 200:
         st.success("Quality check completed successfully. Download result below:")
@@ -242,8 +390,8 @@ if uploaded_etl_file and st.button("Execute ETL"):
     else:
         st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
-#### PIPELINE STATUS
 
+# PIPELINE STATUS
 st.divider()
 
 # Check pipeline status section
@@ -260,74 +408,96 @@ if st.button("Check Status"):
             if status["result"]:
                 st.write(f"Result: {status['result']}")
 
-            response_data_1 = requests.get(
-                f"http://{mode}/results/{task_id_input}/processed_texts"
-            )
-            if response_data_1.status_code == 200:
-                # Provide the file content for download
+            # New: stop-running button
+            if status.get("is_running", False):
+                if st.button("Stop this task"):
+                    stop_resp = requests.post(
+                        f"http://{mode}/cancel/{task_id_input}")
+                    if stop_resp.status_code == 200:
+                        st.info(stop_resp.json().get(
+                            "message", "Cancellation requested."))
+                    else:
+                        try:
+                            st.error(stop_resp.json().get(
+                                "detail", "Unable to cancel task"))
+                        except Exception:
+                            st.error("Unable to cancel task")
+
+            # Step 0: LLM annotations (raw)
+            response_data_0 = requests.get(
+                _api(f"/results/{task_id_input}/llm_annotations"), timeout=30)
+            if response_data_0.status_code == 200:
                 st.download_button(
-                    label="Download Excel step 1",
-                    data=response_data_1.content,
-                    file_name=f"{task_id_input}_processed_texts.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    label="Download LLM Annotations (Raw CSV)",
+                    data=response_data_0.content,
+                    file_name=f"{task_id_input}_llm_annotations.csv",
+                    mime="text/csv",
                 )
             else:
-                st.error(
-                    f"Error fetching file 1: {response.json().get('detail', 'Unknown error')}"
+                st.info("LLM annotations not available yet (only for full pipeline)")
+
+            # Step 1: Processed Texts (after regex extraction)
+            response_data_1 = requests.get(
+                _api(f"/results/{task_id_input}/processed_texts"), timeout=30)
+            if response_data_1.status_code == 200:
+                st.download_button(
+                    label="Download CSV step 1 (Processed Texts)",
+                    data=response_data_1.content,
+                    file_name=f"{task_id_input}_processed_texts.csv",
+                    mime="text/csv",
                 )
+            else:
+                st.error(f"Error fetching file 1: {response_data_1.text}")
 
             response_data_2 = requests.get(
-                f"http://{mode}/results/{task_id_input}/linked_data"
-            )
+                _api(f"/results/{task_id_input}/linked_data"), timeout=30)
             if response_data_2.status_code == 200:
-                # Provide the file content for download
                 st.download_button(
-                    label="Download Excel step 2",
+                    label="Download CSV step 2 (Linked Data)",
                     data=response_data_2.content,
-                    file_name=f"{task_id_input}_linked_data.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    file_name=f"{task_id_input}_linked_data.csv",
+                    mime="text/csv",
                 )
             else:
-                st.error(
-                    f"Error fetching file 2: {response.json().get('detail', 'Unknown error')}"
-                )
+                st.error(f"Error fetching file 2: {response_data_2.text}")
 
             response_data_3 = requests.get(
-                f"http://{mode}/results/{task_id_input}/quality_check"
-            )
+                _api(f"/results/{task_id_input}/quality_check"), timeout=30)
             if response_data_3.status_code == 200:
                 st.download_button(
-                    label="Download Excel step 3",
+                    label="Download CSV step 3 (Quality Check)",
                     data=response_data_3.content,
-                    file_name=f"{task_id_input}_quality_check.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    file_name=f"{task_id_input}_quality_check.csv",
+                    mime="text/csv",
                 )
 
                 # Upload option if pipeline is completed
                 if status["step"] == "Completed":
-                    st.write("✅ Pipeline finished. You can now upload the final file.")
+                    st.write(
+                        "✅ Pipeline finished. You can now upload the final file.")
                     if st.button("Send Final File to Upload Endpoint"):
                         try:
-                            # Use an in-memory bytes object from response content
                             files = {
                                 'dataFile': (
-                                    f'{task_id_input}_quality_check.xlsx',
+                                    f'{task_id_input}_quality_check.csv',
                                     response_data_3.content,
-                                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                                    'text/csv'
                                 )
                             }
-                            upload_response = requests.post(f"http://{ETL_HOST}/etl/upload", files=files)
+                            upload_response = requests.post(
+                                f"http://{ETL_HOST}/etl/upload", files=files)
                             if upload_response.status_code == 200:
                                 st.success("Final file successfully uploaded!")
                             else:
-                                st.error(f"Upload failed with status code {upload_response.status_code}")
+                                st.error(
+                                    f"Upload failed with status code {upload_response.status_code}")
                         except Exception as e:
                             st.error(f"Upload failed: {e}")
             else:
-                st.error(
-                    f"Error fetching file 3: {response.json().get('detail', 'Unknown error')}"
-                )
-
+                st.error(f"Error fetching file 3: {response_data_3.text}")
+        else:
+            st.error(
+                f"Error: {response.json().get('detail', 'Unknown error')}")
     else:
         st.warning("Please enter a valid Task ID.")
 
@@ -339,13 +509,18 @@ task_id_logs = st.text_input("Enter Task ID to view logs:")
 
 if st.button("Fetch Logs"):
     if task_id_logs:
-        response = requests.get(f"http://{mode}/logs/{task_id_logs}")
-        if response.status_code == 200:
-            logs = response.json()["logs"]
-            st.write("### Logs:")
-            for log in logs:
-                st.write(f"[{log['timestamp']}] {log['level']}: {log['message']}")
-        else:
-            st.error(f"Error: {response.json().get('detail', 'Task not found')}")
+        try:
+            response = requests.get(_api(f"/logs/{task_id_logs}"), timeout=10)
+            if response.status_code == 200:
+                logs = response.json()["logs"]
+                st.write("### Logs:")
+                for log in logs:
+                    st.write(
+                        f"[{log['timestamp']}] {log['level']}: {log['message']}")
+            else:
+                st.error(
+                    f"Error: {response.json().get('detail', 'Task not found')}")
+        except Exception as e:
+            st.error(f"Logs fetch failed. Backend {mode} not reachable: {e}")
     else:
         st.warning("Please enter a valid Task ID.")

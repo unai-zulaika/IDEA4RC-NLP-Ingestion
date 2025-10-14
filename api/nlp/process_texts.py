@@ -1,4 +1,4 @@
-""" 
+"""
 NLP Text Processing Module
 
 This module provides functions for processing medical texts using LLMs and regex-based extraction.
@@ -65,7 +65,6 @@ types_map = {
 
 def process_texts_with_llm(
     texts: pandas.DataFrame,
-    excel_data: pandas.DataFrame,
     model_path: str = None,
     prompts_json_path: str = None,
     fewshots_dict: Dict[str, List[tuple]] = None,
@@ -159,6 +158,10 @@ def process_texts_with_llm(
                 note_text=text
             )
 
+            print(f"    [DEBUG] Prompt:\n{prompt}\n")
+
+            print("***" * 20)
+
             # Run the model
             try:
                 output = run_model_with_prompt(
@@ -169,6 +172,15 @@ def process_texts_with_llm(
 
                 annotation = output["normalized"]
                 raw_output = output["raw"]
+
+                print(f"    [DEBUG] Raw Output:\n{raw_output}\n")
+                print("####" * 20)
+
+                # Clean annotation: remove "Annotation: " prefix if present
+                if annotation and isinstance(annotation, str):
+                    # Remove case-insensitive "Annotation:" or "Annotation :" prefix
+                    annotation = re.sub(
+                        r'^\s*annotation\s*:\s*', '', annotation, flags=re.IGNORECASE).strip()
 
                 # Parse annotation to extract multiple values if enabled
                 if parse_multiple_values:
@@ -316,6 +328,440 @@ def extract_dates_from_annotation(annotation: str) -> List[str]:
     return dates
 
 
+def process_llm_annotations_with_regex(
+    llm_annotations: pandas.DataFrame,
+    excel_data: pandas.DataFrame,
+    sarcoma_dictionary_path: str = None,
+    sarcoma_dictionary_regexp_path: str = None
+) -> pandas.DataFrame:
+    """
+    Process LLM annotations using regex patterns to extract structured data.
+
+    This function takes pre-generated LLM annotations and applies regex patterns
+    to extract structured values, which are then added to the excel_data DataFrame.
+
+    Args:
+        llm_annotations (pandas.DataFrame): DataFrame with columns: prompt_type, annotation, p_id, date, note_id, report_type, extracted_dates
+        excel_data (pandas.DataFrame): Existing Excel data to append to
+        sarcoma_dictionary_path (str): Path to sarcoma_dictionary.json. If None, uses default path.
+        sarcoma_dictionary_regexp_path (str): Path to sarcoma_dictionary_regexp.json. If None, uses default path.
+
+    Returns:
+        pandas.DataFrame: Excel data with new structured data appended
+    """
+
+    print("[DEBUG] ========================================")
+    print("[DEBUG] Starting process_llm_annotations_with_regex")
+    print("[DEBUG] ========================================")
+
+    # Set default paths
+    script_dir = Path(__file__).resolve().parent
+    if sarcoma_dictionary_path is None:
+        sarcoma_dictionary_path = script_dir / "sarcoma_dictionary_updated.json"
+    if sarcoma_dictionary_regexp_path is None:
+        sarcoma_dictionary_regexp_path = script_dir / "sarcoma_dictionary_regexp.json"
+
+    print(f"[DEBUG] Using sarcoma_dictionary: {sarcoma_dictionary_path}")
+    print(
+        f"[DEBUG] Using sarcoma_dictionary_regexp: {sarcoma_dictionary_regexp_path}")
+
+    # Validate input DataFrames
+    print(f"[DEBUG] Input llm_annotations shape: {llm_annotations.shape}")
+    print(
+        f"[DEBUG] Input llm_annotations columns: {list(llm_annotations.columns)}")
+    print(f"[DEBUG] Input excel_data shape: {excel_data.shape}")
+    print(
+        f"[DEBUG] Input excel_data columns: {list(excel_data.columns) if not excel_data.empty else 'EMPTY'}")
+
+    # Ensure excel_data has required columns
+    if excel_data is None or excel_data.empty:
+        print("[DEBUG] excel_data is empty, initializing new DataFrame")
+        excel_data = pandas.DataFrame(columns=[
+            "patient_id", "original_source", "core_variable",
+            "date_ref", "value", "record_id", "note_id", "prompt_type", "types"
+        ])
+
+    # Normalize column names for compatibility
+    if "patient_id" not in excel_data.columns and "p_id" in excel_data.columns:
+        print("[DEBUG] Renaming 'p_id' to 'patient_id' in excel_data")
+        excel_data["patient_id"] = excel_data["p_id"]
+
+    # Load regex dictionaries
+    print("[DEBUG] Loading regex dictionaries...")
+    try:
+        with sarcoma_dictionary_path.open("r", encoding="utf-8") as file:
+            summary_dict: dict[str, str] = json.load(file)
+        print(
+            f"[DEBUG] Loaded {len(summary_dict)} entries from sarcoma_dictionary.json")
+
+        with sarcoma_dictionary_regexp_path.open("r", encoding="utf-8") as file:
+            regexp_dict: dict[str, str] = json.load(file)
+        print(
+            f"[DEBUG] Loaded {len(regexp_dict)} regex patterns from sarcoma_dictionary_regexp.json")
+        missing = [
+            aid for aid, data in summary_dict.items()
+            if data.get("parameters") and not str(regexp_dict.get(aid, "")).strip()
+        ]
+        if missing:
+            print(
+                f"[WARN] {len(missing)} annotations have missing/empty regex patterns. Sample: {missing[:10]}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load dictionaries: {e}")
+        raise
+
+    # Get the biggest record_id from excel_data
+    if not excel_data.empty and "record_id" in excel_data.columns:
+        try:
+            max_record_id = int(excel_data["record_id"].max()) if not pandas.isna(
+                excel_data["record_id"].max()) else 0
+        except Exception:
+            max_record_id = 0
+    else:
+        max_record_id = 0
+
+    print(f"[DEBUG] Starting record_id: {max_record_id}")
+
+    # Helpers to avoid appending empty/placeholder values
+    def _to_str(val) -> str:
+        try:
+            return str(val).strip()
+        except Exception:
+            return ""
+
+    def _is_placeholder(text: str) -> bool:
+        s = _to_str(text).lower()
+        if not s:
+            return True
+        if s in {"n/a", "na", "none", "null", "unknown", "unk", "-", "--"}:
+            return True
+        # [provide date], [select regimen], [something]
+        if re.fullmatch(r"\[[^\]]+\]", s or ""):
+            return True
+        return False
+
+    def _is_invalid_value(param_type: str, value) -> bool:
+        # Treat NaN/None/empty and placeholders as invalid
+        if value is None:
+            return True
+        try:
+            if pandas.isna(value):
+                return True
+        except Exception:
+            pass
+        s = _to_str(value)
+        if not s:
+            return True
+        if _is_placeholder(s):
+            return True
+        # Optional: for DATE, enforce basic date pattern hint
+        if param_type == "DATE":
+            if not re.search(r"\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}", s):
+                return True
+        return False
+
+    # Process each LLM annotation
+    new_rows = []
+    annotation_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    print(f"[DEBUG] Processing {len(llm_annotations)} LLM annotations...")
+    print("[DEBUG] ========================================")
+
+    for index, llm_row in llm_annotations.iterrows():
+        print(
+            f"\n[DEBUG] --- Processing annotation {index + 1}/{len(llm_annotations)} ---")
+
+        # Extract data from LLM results
+        annotation_text = llm_row.get("annotation", "")
+        prompt_type = llm_row.get("prompt_type", "")
+        patient_id = llm_row.get("p_id", "")
+        note_date = llm_row.get("date", "")
+        note_id = llm_row.get("note_id", "")
+
+        print(f"[DEBUG] Patient ID: {patient_id}")
+        print(f"[DEBUG] Note ID: {note_id}")
+        print(f"[DEBUG] Prompt Type: {prompt_type}")
+        print(f"[DEBUG] Note Date: {note_date}")
+        print(f"[DEBUG] Annotation Text (raw): {annotation_text[:100]}..." if len(str(
+            annotation_text)) > 100 else f"[DEBUG] Annotation Text (raw): {annotation_text}")
+
+        # Clean annotation text - remove "Annotation:" prefix if present
+        if annotation_text and isinstance(annotation_text, str):
+            original_annotation = annotation_text
+            annotation_text = annotation_text.replace(
+                "Annotation:", "").strip()
+            # strip surrounding double quotes if present
+            annotation_text = re.sub(r'^"+|"+$', '', annotation_text)
+            if original_annotation != annotation_text:
+                print(f"[DEBUG] Annotation normalized: {annotation_text}")
+
+        # Try to use extracted dates from annotation, fall back to note date
+        extracted_dates = llm_row.get("extracted_dates", [])
+
+        # Handle string representation of lists
+        if isinstance(extracted_dates, str):
+            import ast
+            try:
+                extracted_dates = ast.literal_eval(
+                    extracted_dates) if extracted_dates else []
+            except Exception:
+                extracted_dates = []
+
+        if extracted_dates and len(extracted_dates) > 0:
+            date = extracted_dates[0]
+            print(f"[DEBUG] Using extracted date: {date}")
+        else:
+            date = note_date
+            print(f"[DEBUG] No extracted date, using note date: {date}")
+
+        # Skip error annotations
+        if str(annotation_text).startswith("ERROR:"):
+            print(f"[WARN] Skipping error annotation: {annotation_text}")
+            error_count += 1
+            continue
+
+        # Track if any pattern matched for this annotation
+        annotation_matched = False
+
+        # Apply regex patterns to the annotation text
+        print(
+            f"[DEBUG] Checking against {len(summary_dict)} annotation patterns...")
+
+        for annotation_id, annotation_data in summary_dict.items():
+
+            # Check if there are parameters defined
+            if "parameters" not in annotation_data or not annotation_data["parameters"]:
+                # print(
+                #     f"[DEBUG]     No parameters defined, checking for content match...")
+
+                # No parameters - check for exact/partial match
+                sentence_content = annotation_data.get("sentence_content", "")
+                norm_content = sentence_content.lower().strip()
+                norm_annotation = annotation_text.lower().strip()
+
+                print(f"[DEBUG]     Expected content: '{sentence_content}'")
+
+                # Check for match
+                if norm_content in norm_annotation or norm_annotation in norm_content:
+                    print(
+                        f"[INFO] ✓ Matched parameterless sentence {annotation_id}: {sentence_content}")
+                    annotation_matched = True
+
+                    # Look for associated_variable in first parameter if exists
+                    params = annotation_data.get("parameters", [])
+                    if params and len(params) > 0 and "associated_variable" in params[0]:
+                        assoc_var = params[0]["associated_variable"]
+                        value = params[0].get("value", "")
+
+                        print(f"[DEBUG]     Associated variable: {assoc_var}")
+                        print(f"[DEBUG]     Value: {value}")
+
+                        if assoc_var and value:
+                            max_record_id += 1
+                            new_row = {
+                                "patient_id": patient_id,
+                                "original_source": "NLP_LLM",
+                                "core_variable": assoc_var,
+                                "date_ref": date,
+                                "value": value,
+                                "record_id": max_record_id,
+                                "note_id": note_id,
+                                "prompt_type": prompt_type
+                            }
+                            new_rows.append(new_row)
+                            # print(f"[DEBUG]     ✓ Added new row: {new_row}")
+                #     else:
+                #         print(
+                #             f"[DEBUG]     No associated_variable found in parameters")
+                # else:
+                #     print(f"[DEBUG]     ✗ No content match")
+                continue
+
+            # Get the regex pattern for the current annotation
+            pattern = regexp_dict.get(annotation_id)
+            # Skip if pattern is missing or blank (avoid empty-regex matching everywhere)
+            if not pattern or not str(pattern).strip():
+                # print(
+                #     f"[DEBUG]     No regex pattern found for annotation_id {annotation_id}, skipping")
+                continue
+            # Validate and compile the regex
+            try:
+                regex = re.compile(pattern, re.IGNORECASE)
+            except re.error as e:
+                print(
+                    f"[WARN]     Invalid regex for annotation_id {annotation_id}: {e}, skipping")
+                skipped_count += 1
+                continue
+
+            print(f"[DEBUG]     Regex pattern: {pattern}")
+
+            # Find all matches in the annotation text
+            matches: list = regex.findall(annotation_text)
+
+            if matches:
+                annotation_matched = True
+                annotation_count += 1
+                print(f"[INFO] ✓ Matched annotation {annotation_id}")
+                print(
+                    f"[DEBUG]     Extracted {len(matches)} match(es): {matches}")
+
+                # Handle different match structures
+                if not isinstance(matches[0], tuple):
+                    # Single group match
+                    matches = [(m,) for m in matches]
+                    print(f"[DEBUG]     Converted to tuple format")
+
+                # Process each match
+                for match_index, match in enumerate(matches):
+                    # print(
+                    #     f"[DEBUG]     Processing match {match_index + 1}/{len(matches)}: {match}")
+
+                    # Check if there is parameter_data for the current match
+                    param_index = match_index if match_index < len(
+                        annotation_data["parameters"]) else 0
+                    # print(
+                    #     f"[DEBUG]       Using parameter index: {param_index}")
+
+                    parameter_data = annotation_data["parameters"][param_index]
+                    # if not parameter_data:
+                    #     print(f"[WARN]       No parameter_data found, skipping")
+                    #     continue
+
+                    # Check if associated_variable is present
+                    # if "associated_variable" not in parameter_data or not parameter_data["associated_variable"]:
+                    #     print(
+                    #         f"[WARN]       No associated_variable in parameter_data, skipping")
+                    #     continue
+
+                    assoc_var = parameter_data["associated_variable"]
+                    param_type = parameter_data.get(
+                        "parameter_type", "DEFAULT")
+
+                    # print(f"[DEBUG]       Associated variable: {assoc_var}")
+                    # print(f"[DEBUG]       Parameter type: {param_type}")
+
+                    # Increment record_id for each new entity
+                    max_record_id += 1
+
+                    # Determine the value based on parameter_type
+                    if param_type == "ENUM":
+                        # print(f"[DEBUG]       Processing as ENUM")
+
+                        # Map captured value to concept_id
+                        possible_values = parameter_data.get(
+                            "possible_values", [])
+                        captured_value = match[0] if isinstance(
+                            match, tuple) and len(match) > 0 else match
+
+                        # print(
+                        #     f"[DEBUG]       Captured value: '{captured_value}'")
+                        # print(
+                        #     f"[DEBUG]       Possible values: {possible_values}")
+
+                        value = None
+                        for pv_dict in possible_values:
+                            for key, concept_id in pv_dict.items():
+                                if key.lower() in _to_str(captured_value).lower():
+                                    value = concept_id
+                                    print(
+                                        f"[DEBUG]       ✓ Mapped '{key}' → '{concept_id}'")
+                                    break
+                            if value:
+                                break
+
+                        if not value:
+                            print(
+                                f"[WARN]       ✗ No concept_id mapping found for '{captured_value}'. Skipping row.")
+                            continue
+                    elif param_type in ["DATE", "NUMBER", "TEXT"]:
+                        value = match[0] if isinstance(
+                            match, tuple) and len(match) > 0 else match
+                        print(
+                            f"[DEBUG]       Extracted {param_type} value: {value}")
+                    elif param_type == "DEFAULT":
+                        value = parameter_data.get("value", match)
+                        print(f"[DEBUG]       Using DEFAULT value: {value}")
+                    else:
+                        value = match[0] if isinstance(
+                            match, tuple) and len(match) > 0 else match
+                        print(f"[DEBUG]       Using raw match value: {value}")
+
+                    # Validate assoc_var
+                    assoc_var_str = _to_str(assoc_var)
+                    if not assoc_var_str:
+                        print(
+                            f"[WARN]       ✗ Empty associated_variable. Skipping row.")
+                        skipped_count += 1
+                        continue
+
+                    # Validate value
+                    if _is_invalid_value(param_type, value):
+                        print(
+                            f"[WARN]       ✗ Invalid/empty value for type '{param_type}': '{value}'. Skipping row.")
+                        skipped_count += 1
+                        continue
+
+                    # Check for duplicates
+                    is_duplicate = False
+                    if "patient_id" in excel_data.columns and not excel_data.empty:
+                        existing_rows = excel_data[excel_data["patient_id"]
+                                                   == patient_id]
+                        if not existing_rows.empty:
+                            duplicate_check = existing_rows[
+                                (existing_rows["core_variable"] == assoc_var_str) &
+                                (existing_rows["value"].astype(str) == _to_str(value)) &
+                                (existing_rows["date_ref"].astype(
+                                    str) == _to_str(date))
+                            ]
+                            is_duplicate = not duplicate_check.empty
+                            if is_duplicate:
+                                print(
+                                    f"[DEBUG]       ✗ Duplicate detected, skipping")
+
+                    if not is_duplicate:
+                        new_row = {
+                            "patient_id": patient_id,
+                            "original_source": "NLP_LLM",
+                            "core_variable": assoc_var_str,
+                            "date_ref": date,
+                            "value": value,
+                            "record_id": max_record_id,
+                            "note_id": note_id,
+                            "prompt_type": prompt_type,
+                            "types": types_map.get(param_type, "NOT SPECIFIED")
+                        }
+                        new_rows.append(new_row)
+                        # print(f"[DEBUG]       ✓ Added new row: record_id={max_record_id}, var={assoc_var_str}, val={value}")
+                    else:
+                        skipped_count += 1
+
+        if not annotation_matched:
+            print(f"[DEBUG]   ⚠ No patterns matched for this annotation")
+
+    print("\n[DEBUG] ========================================")
+    print("[DEBUG] Processing Summary:")
+    print(f"[DEBUG]   Total annotations processed: {len(llm_annotations)}")
+    print(f"[DEBUG]   Successful regex matches: {annotation_count}")
+    print(f"[DEBUG]   New rows created: {len(new_rows)}")
+    print(f"[DEBUG]   Duplicates skipped: {skipped_count}")
+    print(f"[DEBUG]   Errors skipped: {error_count}")
+    print(f"[DEBUG]   Final record_id: {max_record_id}")
+    print("[DEBUG] ========================================")
+
+    # Append new rows to excel_data
+    if new_rows:
+        print(f"[DEBUG] Appending {len(new_rows)} new rows to excel_data")
+        new_df = pandas.DataFrame(new_rows)
+        excel_data = pandas.concat(
+            [excel_data, new_df], ignore_index=True) if not excel_data.empty else new_df
+        print(f"[DEBUG] Final excel_data shape: {excel_data.shape}")
+    else:
+        print("[DEBUG] No new rows to append")
+
+    return excel_data
+
+
 def process_texts(
     texts: pandas.DataFrame,
     excel_data: pandas.DataFrame,
@@ -324,7 +770,7 @@ def process_texts(
     fewshots_dict: Dict[str, List[tuple]] = None,
     task_id: str = None,
     is_cancelled_callback=None
-) -> pandas.DataFrame:
+) -> tuple[pandas.DataFrame, pandas.DataFrame]:
     """
     Main function to process texts using LLM and extract structured data.
 
@@ -343,7 +789,9 @@ def process_texts(
         is_cancelled_callback (callable): Optional callback function to check if task is cancelled
 
     Returns:
-        pandas.DataFrame: Excel data with structured data integrated
+        tuple[pandas.DataFrame, pandas.DataFrame]: (excel_data, llm_results)
+            - excel_data: Excel data with structured data integrated
+            - llm_results: Raw LLM annotations from process_texts_with_llm
 
     Raises:
         RuntimeError: If task is cancelled during processing
@@ -355,372 +803,96 @@ def process_texts(
     print("[INFO] Step 1: Running LLM to annotate texts...")
     llm_results = process_texts_with_llm(
         texts=texts,
-        excel_data=excel_data,
         model_path=model_path,
         prompts_json_path=prompts_json_path,
         fewshots_dict=fewshots_dict,
-        parse_multiple_values=True,  # Enable multi-value extraction
+        parse_multiple_values=True,
         task_id=task_id,
         is_cancelled_callback=is_cancelled_callback
     )
 
     print(f"[INFO] LLM generated {len(llm_results)} annotations")
 
-    # Step 2: Load regex dictionaries for parsing structured annotations
-    print("[INFO] Step 2: Loading regex dictionaries for parsing annotations...")
-    script_dir = Path(__file__).resolve().parent
-    summary_dictionary_path = script_dir / "sarcoma_dictionary.json"
-    regexp_dictionary_path = script_dir / "sarcoma_dictionary_regexp.json"
-
-    # Load regex patterns from JSON
-    with summary_dictionary_path.open("r", encoding="utf-8") as file:
-        summary_dict: dict[str, str] = json.load(file)
-    with regexp_dictionary_path.open("r", encoding="utf-8") as file:
-        regexp_dict: dict[str, str] = json.load(file)
-
-    # Step 3: Process LLM annotations and extract structured data
-    print("[INFO] Step 3: Parsing LLM annotations with regex patterns...")
-    new_rows = []
-
-    # Get the biggest record_id from excel_data
-    if not excel_data.empty:
-        max_record_id = excel_data["record_id"].max()
-    else:
-        max_record_id = 0
-
-    # Process each LLM annotation
-    annotation_count = 0
-    for index, llm_row in llm_results.iterrows():
-        # Extract data from LLM results
-        annotation_text = llm_row["annotation"]
-        prompt_type = llm_row["prompt_type"]
-        patient_id = llm_row["p_id"]
-        note_date = llm_row["date"]  # Original note date
-        note_id = llm_row["note_id"]
-
-        # Try to use extracted dates from annotation, fall back to note date
-        extracted_dates = llm_row.get("extracted_dates", [])
-        if extracted_dates and len(extracted_dates) > 0:
-            date = extracted_dates[0]  # Use first extracted date
-            print(f"[INFO] Using extracted date: {date} for annotation")
-        else:
-            date = note_date  # Fall back to original note date
-            print(f"[INFO] No date extracted, using note date: {date}")
-
-        # Skip error annotations
-        if annotation_text.startswith("ERROR:"):
-            print(f"[WARN] Skipping error annotation: {annotation_text}")
-            continue
-
-        # Apply regex patterns to the annotation text
-        for annotation_id, annotation_data in summary_dict.items():
-            # Get the regex pattern for the current annotation
-            pattern = regexp_dict.get(annotation_id, "")
-            if not pattern:
-                continue
-
-            # Find all matches in the annotation text (not the original text!)
-            matches: list[str] = re.findall(pattern, annotation_text)
-            if matches:
-                annotation_count += 1
-                for match_index, match in enumerate(matches):
-                    # check if there is parameter_data for the current match
-                    if len(annotation_data["parameters"]) <= match_index:
-                        continue
-                    parameter_data = annotation_data["parameters"][match_index]
-                    if not parameter_data:
-                        continue
-                    # check if associated_variable is present in the parameter_data
-                    if "associated_variable" not in parameter_data:
-                        continue
-
-                    print(
-                        f"[INFO] Processing match: '{match}' for annotation_id: {annotation_id}, patient: {patient_id}")
-
-                    # get the entity by the associated variable if associated_variable is present
-                    if "associated_variable" in parameter_data:
-                        entity = parameter_data["associated_variable"].split(".")[
-                            0]
-                        # look for other rows in excel_data with the same entity and date
-                        existing_rows = excel_data[
-                            (excel_data["core_variable"].str.split(".").str[0] == entity) &
-                            (excel_data["date_ref"] == date) &
-                            (excel_data["patient_id"] == patient_id)
-                        ]
-                    else:
-                        existing_rows = pandas.DataFrame(
-                            columns=excel_data.columns)
-
-                    # If there are existing rows, reuse the record_id
-                    if not existing_rows.empty:
-                        record_id = existing_rows.iloc[0]["record_id"]
-                    else:
-                        # If no existing rows, use the max_record_id and increment it
-                        record_id = max_record_id
-                        max_record_id += 1
-
-                    value = match
-                    if parameter_data.get("parameter_type") == "ENUM":
-                        print(
-                            f"[INFO] Processing ENUM type for match: {match}")
-                        # find the corresponding value in possible_values array
-                        possible_values = parameter_data.get(
-                            "possible_values", [])
-                        for pos_val in possible_values:
-                            if match in pos_val:
-                                # If the match is in the possible values, use it
-                                value = pos_val[match]
-                                print(
-                                    f"[INFO] Found value: {value} for match: {match}")
-                                break
-                    elif parameter_data.get("parameter_type") == "DEFAULT":
-                        value = parameter_data.get("value", match)
-
-                    # only append if there is no existing row with the same core_variable, value, date_ref, and patient_id
-                    if existing_rows[
-                        (existing_rows["core_variable"] == parameter_data["associated_variable"]) &
-                        (existing_rows["value"] == value) &
-                        (existing_rows["date_ref"] == date) &
-                        (existing_rows["patient_id"] == patient_id)
-                    ].empty:
-                        # Append the new row to the list
-                        print(
-                            f"[INFO] Appending new row for match: '{match}' with value: '{value}'")
-
-                        new_rows.append({
-                            "core_variable": parameter_data["associated_variable"],
-                            "value": value,
-                            "patient_id": patient_id,
-                            "original_source": "NLP_LLM",
-                            "date_ref": date,
-                            "record_id": record_id,
-                            "types": types_map.get(parameter_data.get("parameter_type", "DEFAULT"), "NOT SPECIFIED"),
-                            "note_id": note_id,
-                            "prompt_type": prompt_type
-                        })
-                    else:
-                        print(
-                            f"[INFO] Skipping duplicate: '{match}' already exists")
-
-    # Step 4: Add new rows to excel_data
-    print(f"[INFO] Step 4: Adding {len(new_rows)} new rows to excel_data...")
-    if new_rows:
-        new_rows_df = pandas.DataFrame(new_rows)
-        # Ensure the DataFrame has the same columns as excel_data
-        for col in excel_data.columns:
-            if col not in new_rows_df.columns:
-                new_rows_df[col] = None
-        # Append the new rows to the existing DataFrame
-        excel_data = pandas.concat(
-            [excel_data, new_rows_df], ignore_index=True)
+    # Step 2: Process LLM annotations with regex
+    print("[INFO] Step 2: Processing LLM annotations with regex patterns...")
+    excel_data = process_llm_annotations_with_regex(
+        llm_annotations=llm_results,
+        excel_data=excel_data
+    )
 
     print(
-        f"[INFO] Processing complete! Processed {len(llm_results)} LLM annotations, found {annotation_count} regex matches, added {len(new_rows)} new rows")
-    return excel_data
+        f"[INFO] Processing complete! Final excel_data has {len(excel_data)} records")
 
-
-def process_texts_old(texts: pandas.DataFrame, excel_data: pandas.DataFrame) -> pandas.DataFrame:
-    """
-    Function to process texts and extract structured data from them
-
-    Args:
-    - texts (pandas.DataFrame): List of texts to process
-    - excel_data (pandas.DataFrame): Excel data to integrate structured data into
-
-    return:
-    - excel_data (pandas.DataFrame): Excel data with structured data integrated
-    """
-
-    # Initialize an NLP model (e.g., Named Entity Recognition)
-    # nlp = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
-    patient_id = 3  # this should come from the texts
-
-    # we load dictionary for LLM output
-    # Get the absolute path of the current script
-    script_dir = Path(__file__).resolve().parent
-
-    # Construct the path for the JSON file
-    file_path = script_dir / "output_regex_dict.json"
-
-    # Load regex patterns from JSON
-    with file_path.open("r", encoding="utf-8") as file:
-        patterns: dict[str, str] = json.load(file)
-
-    # Define regex patterns for each type of information
-    # Extract values using regex from JSON
-    identified_values: dict["str", list["str"]] = (
-        {}
-    )  # we can find a list of values for each variable
-    dates = []
-
-    # Example regex patterns
-    # loop texts dataframe
-    for index, row in texts.iterrows():
-        for variable_name, pattern in patterns.items():
-            print(pattern)
-            matches: list[str] = re.findall(pattern, row["text"])
-            if matches:
-                identified_values[variable_name] = matches
-                # if "date" column is not empty, we can add it to the dates list
-                if row["date"] != "":
-                    dates.append(row["date"])
-
-    # Ensure DataFrame has the expected structure before appending
-    if excel_data.empty:
-        excel_data = pd.DataFrame(columns=["core_variable", "value"])
-
-    # Append rows safely
-    z = 0
-    for variable_name, values in identified_values.items():
-        for i, value in enumerate(values):
-            row = {
-                "core_variable": variable_name,
-                "value": value,
-                "patient_id": patient_id,
-                "original_source": "NLP",
-                "date_ref": dates[z],  # Placeholder for date
-                # types must be solved.
-                # date must be solved
-            }
-            z += 1
-            # Fill in any missing columns explicitly
-            for col in excel_data.columns:
-                if col not in row:
-                    row[col] = None
-            excel_data.loc[len(excel_data)] = row
-
-    return excel_data
-
-
-def llm_annotations_to_excel_format(
-    llm_results: pandas.DataFrame,
-    excel_data: pandas.DataFrame
-) -> pandas.DataFrame:
-    """
-    Convert LLM annotations to the excel_data format.
-
-    Args:
-        llm_results (pandas.DataFrame): Output from process_texts_with_llm
-        excel_data (pandas.DataFrame): Existing excel data to append to
-
-    Returns:
-        pandas.DataFrame: Updated excel_data with LLM annotations
-    """
-
-    # Get the biggest record_id from excel_data
-    if not excel_data.empty:
-        max_record_id = excel_data["record_id"].max()
-    else:
-        max_record_id = 0
-
-    new_rows = []
-
-    for index, row in llm_results.iterrows():
-        prompt_type = row["prompt_type"]
-        annotation = row["annotation"]
-        p_id = row["p_id"]
-        date = row["date"]
-
-        # Skip error rows
-        if annotation.startswith("ERROR:"):
-            continue
-
-        # Map prompt_type to core_variable
-        # You'll need to define this mapping based on your prompts.json
-        core_variable = f"llm.{prompt_type}"
-
-        # Check for existing records
-        existing_rows = excel_data[
-            (excel_data["core_variable"] == core_variable) &
-            (excel_data["date_ref"] == date) &
-            (excel_data["patient_id"] == p_id)
-        ]
-
-        if existing_rows.empty:
-            record_id = max_record_id
-            max_record_id += 1
-        else:
-            record_id = existing_rows.iloc[0]["record_id"]
-
-        # Only append if not duplicate
-        if existing_rows[
-            (existing_rows["value"] == annotation)
-        ].empty:
-            new_rows.append({
-                "core_variable": core_variable,
-                "value": annotation,
-                "patient_id": p_id,
-                "original_source": "NLP_LLM",
-                "date_ref": date,
-                "record_id": record_id,
-                "types": "string",  # or map based on prompt_type
-            })
-
-    # Append new rows
-    if new_rows:
-        new_rows_df = pandas.DataFrame(new_rows)
-        for col in excel_data.columns:
-            if col not in new_rows_df.columns:
-                new_rows_df[col] = None
-        excel_data = pandas.concat(
-            [excel_data, new_rows_df], ignore_index=True)
-
-    return excel_data
+    return excel_data, llm_results
 
 
 if __name__ == "__main__":
-    # Example usage demonstrating the full pipeline
+    import sys
+
     print("=" * 80)
-    print("EXAMPLE: Full NLP Processing Pipeline")
+    print("DEBUG: Testing process_texts with provided CSV data")
     print("=" * 80)
 
-    # Sample clinical notes
-    sample_texts = pandas.DataFrame([
-        {
-            "text": "Patient has a history of diabetes mellitus type 2 diagnosed on 2022-05-15. "
-                    "Current medications include metformin 500mg twice daily.",
-            "date": "2023-10-01",
-            "p_id": 1,
-            "note_id": 101,
-            "report_type": "clinical_note"
-        },
-        {
-            "text": "Patient presents with hypertension. Blood pressure 145/90. "
-                    "Started on lisinopril 10mg daily. Follow-up scheduled for 2023-11-15.",
-            "date": "2023-10-02",
-            "p_id": 2,
-            "note_id": 102,
-            "report_type": "clinical_note"
-        }
-    ])
+    # Load the LLM annotations CSV (notes input)
+    llm_annotations_path = "nlp/test_data/sarcoma_regex_synthetic_2.csv"
+    processed_texts_path = "nlp/test_data/processed_texts.csv"
 
-    # Initialize empty excel data structure
-    sample_excel_data = pandas.DataFrame(columns=[
-        "core_variable", "value", "patient_id",
-        "original_source", "date_ref", "record_id", "types"
-    ])
+    # Load texts to run LLM (kept for reference; currently not used below)
+    try:
+        with open(llm_annotations_path, "r", encoding="utf-8") as f:
+            first_line = f.readline()
+            delimiter = "," if first_line.count(
+                ",") > first_line.count(";") else ";"
+        print(
+            f"[INFO] Detected delimiter '{delimiter}' for llm_annotations CSV")
+        texts_df = pandas.read_csv(
+            llm_annotations_path, delimiter=delimiter, header=0)
+    except Exception as e:
+        print(f"[ERROR] Failed to load texts CSV: {e}")
+        sys.exit(1)
+    print(f"[INFO] Loaded {len(texts_df)} texts from {llm_annotations_path}")
+    print(texts_df.iloc[0])
+    print(texts_df.columns)
 
-    print("\n[STEP 1] Processing texts with full pipeline (LLM + Regex extraction)...")
-    print("-" * 80)
+    # Load structured data CSV
+    try:
+        with open(processed_texts_path, "r", encoding="utf-8") as f:
+            first_line = f.readline()
+            delimiter = "," if first_line.count(
+                ",") > first_line.count(";") else ";"
+        print(
+            f"[INFO] Detected delimiter '{delimiter}' for processed_texts CSV")
+        excel_data_df = pandas.read_csv(
+            processed_texts_path, delimiter=delimiter, header=0)
+    except Exception as e:
+        print(f"[ERROR] Failed to load processed_texts CSV: {e}")
+        sys.exit(1)
+    print(
+        f"[INFO] Loaded {len(excel_data_df)} existing records from {processed_texts_path}")
 
-    # Main processing function - handles entire workflow:
-    # 1. Runs LLM to annotate texts
-    # 2. Parses LLM annotations with regex
-    # 3. Extracts structured data into excel_data format
-    updated_excel_data = process_texts(
-        texts=sample_texts,
-        excel_data=sample_excel_data
-    )
+    # Regex-only processing with pre-generated LLM annotations
+    llm_results_path = "nlp/test_data/llm_results_output.csv"
+    try:
+        llm_results_df = pandas.read_csv(llm_results_path)
+        print(
+            f"[INFO] Loaded {len(llm_results_df)} LLM annotations from {llm_results_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load LLM results CSV: {e}")
+        sys.exit(1)
 
-    print("\n[RESULT] Updated Excel Data:")
-    print("-" * 80)
-    print(updated_excel_data)
-    print(f"\nTotal rows in excel_data: {len(updated_excel_data)}")
+    try:
+        updated_excel_data = process_llm_annotations_with_regex(
+            llm_annotations=llm_results_df,
+            excel_data=excel_data_df
+        )
+    except Exception as e:
+        print(f"[ERROR] Regex processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
-    # Save results
-    updated_excel_data.to_csv("updated_excel_data_demo.csv", index=False)
-    print("\n[SAVED] Results saved to 'updated_excel_data_demo.csv'")
-
-    print("\n" + "=" * 80)
-    print("Pipeline complete!")
-    print("=" * 80)
+    print(
+        f"[INFO] Final structured data has {len(updated_excel_data)} records")
+    updated_excel_data.to_csv(
+        "nlp/test_data/updated_structured_data.csv", index=False)
+    print("Finished processing. Updated data saved to updated_structured_data.csv")

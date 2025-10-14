@@ -2,6 +2,7 @@ import pandas as pd
 import json
 from pathlib import Path
 import re
+from itertools import count
 
 
 # data = pd.read_excel(
@@ -23,7 +24,7 @@ import re
 #     sentence_name = row["SENTENCE_NAME"]
 
 #     sentence_content = row["SENTENCE_CONTENT"]
-    
+
 #     # create a dictionary for the current row
 #     row_dict = {
 #         "sentence_id": sentence_id,
@@ -31,7 +32,7 @@ import re
 #         "sentence_content": sentence_content,
 #         "parameters": []
 #     }
-    
+
 #     # add the row dictionary to the final JSON under the first column value as key
 #     final_json[sentence_id] = row_dict
 #     regexp_json[sentence_id] = ""
@@ -56,7 +57,7 @@ import re
 #         possible_values = []
 #     else:
 #         possible_values = [value.strip() for value in possible_values.split(",") if value.strip()]
-    
+
 #     # create a dictionary for the current row
 #     row_dict = {
 #         "parameter_name": parameter_name,
@@ -86,7 +87,7 @@ import re
 #     json.dump(values_json, f, indent=4)
 
 
-### open the sarcoma_dictionary.json
+# open the sarcoma_dictionary.json
 with open("sarcoma_dictionary.json", "r") as f:
     sarcoma_dict = json.load(f)
 
@@ -94,9 +95,26 @@ new_regexp_dict = {}
 
 # loop each element
 for key, value in sarcoma_dict.items():
-    # obtain regexp pattern from value sentence_content by 
-    # substiting [] and everything inside that with (.+?)
-    regexp = re.sub(r'\[.*?\]', '(.+?)', value["sentence_content"])
+    sentence = value["sentence_content"]
+
+    # find all placeholders
+    slots = list(re.finditer(r'\[.*?\]', sentence))
+
+    # use a counter instead of nonlocal idx
+    slot_counter = count(0)
+
+    def replace_slot(m):
+        i = next(slot_counter)
+        is_last = i == len(slots) - 1
+        # for the last slot, capture up to the period/EOL; otherwise use lazy
+        return r'([^.]+)' if is_last else r'(.+?)'
+
+    # build regex
+    regexp = re.sub(r'\[.*?\]', replace_slot, sentence)
+    # allow optional trailing period/whitespace
+    if regexp.strip().endswith('([^.]+)'):
+        regexp = regexp + r'\s*(?:\.|$)'
+
     new_regexp_dict[key] = regexp
 
 # save the new regexp dictionary

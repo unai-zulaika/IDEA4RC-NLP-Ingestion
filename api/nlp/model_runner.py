@@ -25,8 +25,10 @@ def load_prompts_from_json(json_path: str | Path) -> None:
     with open(json_path, "r", encoding="utf-8") as f:
         _PROMPTS = json.load(f)
 
+
 def get_prompt(task_key: str,
-               fewshots: List[Tuple[str, str]],  # list of (note_text, annotation)
+               # list of (note_text, annotation)
+               fewshots: List[Tuple[str, str]],
                note_text: str) -> str:
     """
     Build the final prompt string from the JSON template by key.
@@ -53,10 +55,12 @@ def _default_threads() -> int:
         return int(env)
     try:
         import psutil
-        n = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or 4
+        n = psutil.cpu_count(logical=False) or psutil.cpu_count(
+            logical=True) or 4
     except Exception:
         n = os.cpu_count() or 4
     return max(1, n - 1)
+
 
 def _detect_vram_gb() -> Optional[float]:
     if pynvml is None:
@@ -73,6 +77,7 @@ def _detect_vram_gb() -> Optional[float]:
             pynvml.nvmlShutdown()
         except Exception:
             pass
+
 
 def _pick_n_gpu_layers(model_layers: int = 32) -> int:
     env = os.getenv("LLAMA_N_GPU_LAYERS")
@@ -95,6 +100,7 @@ def _pick_n_gpu_layers(model_layers: int = 32) -> int:
         return int(model_layers * 0.33)
     return 0
 
+
 def init_model(model_path: str,
                n_ctx: int = 4096,
                model_layers: int = 32) -> None:
@@ -111,7 +117,8 @@ def init_model(model_path: str,
 
     for n_gpu_layers in ([try_gpu] if try_gpu == 0 else [try_gpu, 0]):
         try:
-            print(f"[llama.cpp] init n_gpu_layers={n_gpu_layers}, n_threads={n_threads}")
+            print(
+                f"[llama.cpp] init n_gpu_layers={n_gpu_layers}, n_threads={n_threads}")
             _LLM = Llama(
                 model_path=model_path,
                 n_ctx=n_ctx,
@@ -123,9 +130,11 @@ def init_model(model_path: str,
             print("[llama.cpp] model ready")
             return
         except Exception as e:
-            print(f"[llama.cpp] init failed (n_gpu_layers={n_gpu_layers}): {e}")
+            print(
+                f"[llama.cpp] init failed (n_gpu_layers={n_gpu_layers}): {e}")
             _LLM = None
     raise RuntimeError("Could not initialize llama.cpp (GPU+CPU both failed).")
+
 
 def run_model_with_prompt(prompt: str,
                           max_new_tokens: int = 128,
@@ -135,18 +144,19 @@ def run_model_with_prompt(prompt: str,
     Returns {"raw": full_text, "normalized": first_line_after_response}.
     """
     if _LLM is None:
-        raise RuntimeError("Model not initialized. Call init_model(...) first.")
+        raise RuntimeError(
+            "Model not initialized. Call init_model(...) first.")
 
     out = _LLM.create_chat_completion(
         messages=[
-            {"role": "system", "content": "You are a concise medical text annotation assistant."},
+            {"role": "system",
+                "content": "You are a concise medical text annotation assistant."},
             {"role": "user", "content": prompt},
         ],
         max_tokens=max_new_tokens,
         temperature=temperature,
     )
     raw = out["choices"][0]["message"]["content"]
-    
 
     # Normalize: extract the first line (your prompts end with "Annotation: ")
     # If you prefer to split by "### Response:", do it here.
