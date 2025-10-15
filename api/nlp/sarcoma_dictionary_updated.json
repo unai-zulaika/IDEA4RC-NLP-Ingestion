@@ -24,23 +24,10 @@
     "sentence_content": "Other systemic therapy was applied [select where]: [please specify]",
     "parameters": [
       {
-        "parameter_name": "select where",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "at the hosptial": "Yes done at the hospital"
-          },
-          {
-            "outside of the hospital": "Yes done at a different hospital"
-          }
-        ],
-        "associated_variable": "SystemicTreatment.systemictreatmentHospital"
-      },
-      {
         "parameter_name": "please specify",
         "parameter_type": "TEXT",
         "possible_values": [],
-        "associated_variable": "SystemicTreatment.typeOfSystemicTreatment"
+        "associated_variable": "SystemicTreatment.systemictreatmentHospital"
       }
     ]
   },
@@ -73,232 +60,6 @@
       }
     ]
   },
-  "233": {
-    "sentence_id": 233,
-    "sentence_name": "Degree of cytologic Atypia",
-    "sentence_content": "Degree of cytologic Atypia in [select material type] specimen: [select from list]",
-    "parameters": [
-      {
-        "parameter_name": "select material type",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "biopsy": ""
-          },
-          {
-            "surgical": "4301351"
-          }
-        ],
-        "associated_variable": ""
-      },
-      {
-        "parameter_name": "select from list",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "mild": ""
-          },
-          {
-            "moderate": ""
-          },
-          {
-            "severe": ""
-          }
-        ],
-        "associated_variable": ""
-      }
-    ]
-  },
-  "234": {
-    "sentence_id": 234,
-    "sentence_name": "Pattern of Growth",
-    "sentence_content": "Pattern of growth in [select material type] specimen: [please specify]",
-    "parameters": [
-      {
-        "parameter_name": "select material type",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "biopsy": ""
-          },
-          {
-            "surgical": "4301351"
-          }
-        ],
-        "associated_variable": ""
-      },
-      {
-        "parameter_name": "please specify",
-        "parameter_type": "TEXT",
-        "possible_values": [],
-        "associated_variable": ""
-      }
-    ]
-  },
-  "235": {
-    "sentence_id": 235,
-    "sentence_name": "Infiltration of surrounding myometrium",
-    "sentence_content": "Infiltration of surrounding myometrium in [select material type] specimen: [select from list]",
-    "parameters": [
-      {
-        "parameter_name": "select material type",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "biopsy": ""
-          },
-          {
-            "surgical": "4301351"
-          }
-        ],
-        "associated_variable": ""
-      },
-      {
-        "parameter_name": "select from list",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "yes": "4188539"
-          },
-          {
-            "no": "4188540"
-          }
-        ],
-        "associated_variable": ""
-      }
-    ]
-  },
-  "236": {
-    "sentence_id": 236,
-    "sentence_name": "Necrosis",
-    "sentence_content": "Necrosis in [select material type] specimen (type of): [please specify]",
-    "parameters": [
-      {
-        "parameter_name": "select material type",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "biopsy": ""
-          },
-          {
-            "surgical": "4301351"
-          }
-        ],
-        "associated_variable": ""
-      },
-      {
-        "parameter_name": "please specify",
-        "parameter_type": "TEXT",
-        "possible_values": [],
-        "associated_variable": ""
-      }
-    ]
-  },
-  "237": {
-    "sentence_id": 237,
-    "sentence_name": "Receptor expression",
-    "sentence_content": "Receptor expression in ER/PR in [select material type] specimen: [select from list]",
-    "parameters": [
-      {
-        "parameter_name": "select material type",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "biopsy": ""
-          },
-          {
-            "surgical": "4301351"
-          }
-        ],
-        "associated_variable": ""
-      },
-      {
-        "parameter_name": "select from list",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "ER": ""
-          },
-          {
-            "PR": ""
-          },
-          {
-            "other": "4077953"
-          }
-        ],
-        "associated_variable": ""
-      }
-    ]
-  },
-  "238": {
-    "sentence_id": 238,
-    "sentence_name": "Vascular intrusion or invasion",
-    "sentence_content": "Vascular involvement in [select material type] specimen: [select from list]",
-    "parameters": [
-      {
-        "parameter_name": "select material type",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "biopsy": ""
-          },
-          {
-            "surgical": "4301351"
-          }
-        ],
-        "associated_variable": ""
-      },
-      {
-        "parameter_name": "select from list",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "intrusion": ""
-          },
-          {
-            "invasion": ""
-          }
-        ],
-        "associated_variable": ""
-      }
-    ]
-  },
-  "239": {
-    "sentence_id": 239,
-    "sentence_name": "Gene expression",
-    "sentence_content": "Gene expression [select material type] specimen: [select from list]",
-    "parameters": [
-      {
-        "parameter_name": "select material type",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "biopsy": ""
-          },
-          {
-            "surgical": "4301351"
-          }
-        ],
-        "associated_variable": ""
-      },
-      {
-        "parameter_name": "select from list",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "p16": ""
-          },
-          {
-            "p53": ""
-          },
-          {
-            "other": "4077953"
-          }
-        ],
-        "associated_variable": ""
-      }
-    ]
-  },
   "240": {
     "sentence_id": 240,
     "sentence_name": "Second primary cancer",
@@ -308,7 +69,7 @@
         "parameter_name": "put date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "CancerEpisode.cancerStartDate"
       },
       {
         "parameter_name": "provide site information",
@@ -340,13 +101,13 @@
             "progression": "32949"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "EpisodeEvent.diseaseStatus"
       },
       {
         "parameter_name": "put date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "EpisodeEvent.dateOfEpisode"
       }
     ]
   },
@@ -573,7 +334,7 @@
         "parameter_name": "please provide details",
         "parameter_type": "TEXT",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Patient.previousMalignantCancerSite"
       }
     ]
   },
@@ -611,7 +372,7 @@
             "other": "4077953"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Patient.previousCancerTreatment"
       }
     ]
   },
@@ -655,26 +416,19 @@
             "unplanned excision (no tumor rupture)": "4279903"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.typeOfBiopsy"
       },
       {
         "parameter_name": "put date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.dateOfBiopsy"
       },
       {
         "parameter_name": "select place",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "the hospital": ""
-          },
-          {
-            "other hospital": ""
-          }
-        ],
-        "associated_variable": ""
+        "parameter_type": "TEXT",
+        "possible_values": [],
+        "associated_variable": "Diagnosis.biopsyDoneBy"
       }
     ]
   },
@@ -747,7 +501,7 @@
             "Upper arm": "4165266"
           },
           {
-            "Foot": ""
+            "Foot": "4211098"
           },
           {
             "Ankle": "4142359"
@@ -786,7 +540,7 @@
             "Axilla": "4157836"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.subsite"
       }
     ]
   },
@@ -812,7 +566,7 @@
             "Paravertebral \u2013 cervical": "4046743"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.subsite"
       }
     ]
   },
@@ -853,7 +607,7 @@
             "Mesentery": "4233095"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.subsite"
       }
     ]
   },
@@ -879,7 +633,7 @@
             "Mediastinum": "4088610"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.subsite"
       }
     ]
   },
@@ -935,7 +689,7 @@
             "Vulva": "4166066"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.subsite"
       }
     ]
   },
@@ -985,7 +739,7 @@
         "parameter_name": "put date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": "Diagnosis.dateOfDiagnosis"
+        "associated_variable": ""
       }
     ]
   },
@@ -1017,7 +771,7 @@
             "multifocal": "36769933"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "DiseaseExtent.locoRegional"
       }
     ]
   },
@@ -1146,7 +900,7 @@
             "therapeutic (without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.chemotherapyInfo"
       },
       {
         "parameter_name": "select intent",
@@ -1168,92 +922,92 @@
         "parameter_name": "provide date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.startDateSystemicTreatment"
       },
       {
         "parameter_name": "select regimen",
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "Doxorubicin + Ifosfamide": ""
+            "Doxorubicin + Ifosfamide": "35806965"
           },
           {
-            "Epirubicin + Ifosfamide": ""
+            "Epirubicin + Ifosfamide": "35806948"
           },
           {
-            "Vincristine + Doxorubicin + Ifosfamide": ""
+            "Vincristine + Doxorubicin + Ifosfamide": "2000100060"
           },
           {
-            "Vincristine + Actinomycin D + Ifosfamide": ""
+            "Vincristine + Actinomycin D + Ifosfamide": "35805452"
           },
           {
-            "Gemcitabine + Docetaxel": ""
+            "Gemcitabine + Docetaxel": "35803577"
           },
           {
-            "Doxorubicin + Dacarbazine": ""
+            "Doxorubicin + Dacarbazine": "35806964"
           },
           {
-            "Methotrexate + Doxorubicin + Cisplatin": ""
+            "Methotrexate + Doxorubicin + Cisplatin": "2000100061"
           },
           {
-            "Methotrexate + Doxorubicin + Ifosfamide": ""
+            "Methotrexate + Doxorubicin + Ifosfamide": "2000100062"
           },
           {
-            "Doxorubicin + Cisplatin + Ifosfamide": ""
+            "Doxorubicin + Cisplatin + Ifosfamide": "2000100063"
           },
           {
-            "Doxorubicin + Cisplatin": ""
+            "Doxorubicin + Cisplatin": "35804819"
           },
           {
-            "Methotrexate + Vinorelbine": ""
+            "Methotrexate + Vinorelbine": "2000100064"
           },
           {
-            "Ifosfamide + Etoposide": ""
+            "Ifosfamide + Etoposide": "35805454"
           },
           {
-            "Vincristine + Doxorubicin + Cyclophosphamide": ""
+            "Vincristine + Doxorubicin + Cyclophosphamide": "2000100065"
           },
           {
-            "Cyclophosphamide + Etoposide": ""
+            "Cyclophosphamide + Etoposide": "35806476"
           },
           {
-            "Doxorubicin + Ifosfamide + Dacarbazine": ""
+            "Doxorubicin + Ifosfamide + Dacarbazine": "2000100066"
           },
           {
-            "Gemcitabine + Dacarbazine": ""
+            "Gemcitabine + Dacarbazine": "35806969"
           },
           {
-            "Cyclophosphamide + Topotecan": ""
+            "Cyclophosphamide + Topotecan": "35805453"
           },
           {
-            "Irinotecan + Vincristine": ""
+            "Irinotecan + Vincristine": "2000100067"
           },
           {
-            "Irinotecan + Temozolomide": ""
+            "Irinotecan + Temozolomide": "35805455"
           },
           {
-            "Busulphan + Melphalan": ""
+            "Busulphan + Melphalan": "35804000"
           },
           {
-            "TNF + Melphalan": ""
+            "TNF + Melphalan": "2000100068"
           },
           {
-            "Cyclophosphamide + Vinorelbine": ""
+            "Cyclophosphamide + Vinorelbine": "2000100069"
           },
           {
-            "Vincristine + Ifosfamide + Doxorubicin + Etoposide": ""
+            "Vincristine + Ifosfamide + Doxorubicin + Etoposide": "35805451"
           },
           {
-            "patopanib": ""
+            "patopanib": "35805690"
           },
           {
-            "regorafenib": ""
+            "regorafenib": "35804569"
           },
           {
-            "HD Ifosfamide": ""
+            "HD Ifosfamide": "2000100070"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.regimen"
       }
     ]
   },
@@ -1308,13 +1062,13 @@
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "completion": ""
+            "completion": "44788181"
           },
           {
-            "toxicity": ""
+            "toxicity": "4162594 "
           },
           {
-            "patient intolerance": ""
+            "patient intolerance": "4240582"
           },
           {
             "death": "4306655"
@@ -1371,7 +1125,7 @@
             "unknown": "4129922"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.treatmentResponse"
       }
     ]
   },
@@ -1397,7 +1151,7 @@
             "therapeutic (radiotherapy without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.setting"
       },
       {
         "parameter_name": "select method",
@@ -1410,7 +1164,7 @@
             "particle based": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.beamQuality"
       },
       {
         "parameter_name": "select intention",
@@ -1426,7 +1180,7 @@
             "prolongation of life": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.intent"
       },
       {
         "parameter_name": "please select where",
@@ -1445,7 +1199,7 @@
         "parameter_name": "put date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.startDate"
       }
     ]
   },
@@ -1471,25 +1225,25 @@
             "therapeutic (radiotherapy without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.intent"
       },
       {
         "parameter_name": "put total dose",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.totalDoseGy"
       },
       {
         "parameter_name": "put number of",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.numberOfFractions"
       },
       {
         "parameter_name": "put date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.endDate"
       },
       {
         "parameter_name": "select reason",
@@ -1514,7 +1268,7 @@
             "unknown": "UNK"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.treatmentResponse"
       }
     ]
   },
@@ -1581,7 +1335,7 @@
             "therapeutic (radiotherapy without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.intent"
       },
       {
         "parameter_name": "select response type",
@@ -1603,7 +1357,7 @@
             "unknown": "4129922"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.treatmentResponse"
       }
     ]
   },
@@ -1629,7 +1383,7 @@
             "in combination with ILP": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy_regionalDeepHyperthemia"
       },
       {
         "parameter_name": "list drugs",
@@ -1639,28 +1393,21 @@
       },
       {
         "parameter_name": "select where",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "at the hosptial": ""
-          },
-          {
-            "outside of the hospital": ""
-          }
-        ],
-        "associated_variable": ""
+        "parameter_type": "TEXT",
+        "possible_values": [],
+        "associated_variable": "RegionalDeepHyperthemia_regionaldeephyperthemiaDoneAthospital"
       },
       {
         "parameter_name": "put start date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "RegionalDeepHyperthemia.startDate"
       },
       {
         "parameter_name": "put end date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "RegionalDeepHyperthemia.endDate"
       }
     ]
   },
@@ -1701,7 +1448,7 @@
             "unknown": "4129922"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "RegionalDeepHyperthemia.treatmentResponse"
       }
     ]
   },
@@ -1821,7 +1568,7 @@
             "inferior vena cava": "4271699"
           },
           {
-            "aorta": ""
+            "aorta": "4004831"
           },
           {
             "iliac vessels": "4193451"
@@ -1839,7 +1586,7 @@
             "others": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.subsite"
       }
     ]
   },
@@ -1856,7 +1603,7 @@
             "superior vena cava": "4167648"
           },
           {
-            "aorta": ""
+            "aorta": "4004831"
           },
           {
             "pulmonary vessels": "4035327"
@@ -1868,7 +1615,7 @@
             "others": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.subsite"
       }
     ]
   },
@@ -3396,13 +3143,13 @@
         "parameter_name": "mitoses count",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": "Diagnosis.histologySubgroup"
+        "associated_variable": "Diagnosis_biopsyMitoticCount"
       },
       {
         "parameter_name": "number of HPFs",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyMitoticCount"
       }
     ]
   },
@@ -3415,13 +3162,13 @@
         "parameter_name": "mitoses count",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyMitoticCount"
       },
       {
         "parameter_name": "area",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyMitoticCount"
       }
     ]
   },
@@ -3441,22 +3188,22 @@
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "1": ""
+            "1": "1634371"
           },
           {
-            "2": ""
+            "2": "1634752"
           },
           {
-            "3": ""
+            "3": "1633749"
           },
           {
-            "Other classification system high": ""
+            "Other classification system high": "1635587"
           },
           {
-            "Other classification system low": ""
+            "Other classification system low": "1634085"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyGrading"
       }
     ]
   },
@@ -3576,7 +3323,7 @@
             "therapeutic (without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.chemotherapyInfo"
       },
       {
         "parameter_name": "select intent",
@@ -3592,98 +3339,98 @@
             "life expectancy prolongation": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.intent"
       },
       {
         "parameter_name": "provide date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.startDate"
       },
       {
         "parameter_name": "select regimen",
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "Doxorubicin + Ifosfamide": ""
+            "Doxorubicin + Ifosfamide": "35806965"
           },
           {
-            "Epirubicin + Ifosfamide": ""
+            "Epirubicin + Ifosfamide": "35806948"
           },
           {
-            "Vincristine + Doxorubicin + Ifosfamide": ""
+            "Vincristine + Doxorubicin + Ifosfamide": "2000100060"
           },
           {
-            "Vincristine + Actinomycin D + Ifosfamide": ""
+            "Vincristine + Actinomycin D + Ifosfamide": "35805452"
           },
           {
-            "Gemcitabine + Docetaxel": ""
+            "Gemcitabine + Docetaxel": "35803577"
           },
           {
-            "Doxorubicin + Dacarbazine": ""
+            "Doxorubicin + Dacarbazine": "35806964"
           },
           {
-            "Methotrexate + Doxorubicin + Cisplatin": ""
+            "Methotrexate + Doxorubicin + Cisplatin": "2000100061"
           },
           {
-            "Methotrexate + Doxorubicin + Ifosfamide": ""
+            "Methotrexate + Doxorubicin + Ifosfamide": "2000100062"
           },
           {
-            "Doxorubicin + Cisplatin + Ifosfamide": ""
+            "Doxorubicin + Cisplatin + Ifosfamide": "2000100063"
           },
           {
-            "Doxorubicin + Cisplatin": ""
+            "Doxorubicin + Cisplatin": "35804819"
           },
           {
-            "Methotrexate + Vinorelbine": ""
+            "Methotrexate + Vinorelbine": "2000100064"
           },
           {
-            "Ifosfamide + Etoposide": ""
+            "Ifosfamide + Etoposide": "35805454"
           },
           {
-            "Vincristine + Doxorubicin + Cyclophosphamide": ""
+            "Vincristine + Doxorubicin + Cyclophosphamide": "2000100065"
           },
           {
-            "Cyclophosphamide + Etoposide": ""
+            "Cyclophosphamide + Etoposide": "35806476"
           },
           {
-            "Doxorubicin + Ifosfamide + Dacarbazine": ""
+            "Doxorubicin + Ifosfamide + Dacarbazine": "2000100066"
           },
           {
-            "Gemcitabine + Dacarbazine": ""
+            "Gemcitabine + Dacarbazine": "35806969"
           },
           {
-            "Cyclophosphamide + Topotecan": ""
+            "Cyclophosphamide + Topotecan": "35805453"
           },
           {
-            "Irinotecan + Vincristine": ""
+            "Irinotecan + Vincristine": "2000100067"
           },
           {
-            "Irinotecan + Temozolomide": ""
+            "Irinotecan + Temozolomide": "35805455"
           },
           {
-            "Busulphan + Melphalan": ""
+            "Busulphan + Melphalan": "35804000"
           },
           {
-            "TNF + Melphalan": ""
+            "TNF + Melphalan": "2000100068"
           },
           {
-            "Cyclophosphamide + Vinorelbine": ""
+            "Cyclophosphamide + Vinorelbine": "2000100069"
           },
           {
-            "Vincristine + Ifosfamide + Doxorubicin + Etoposide": ""
+            "Vincristine + Ifosfamide + Doxorubicin + Etoposide": "35805451"
           },
           {
-            "patopanib": ""
+            "patopanib": "35805690"
           },
           {
-            "regorafenib": ""
+            "regorafenib": "35804569"
           },
           {
-            "HD Ifosfamide": ""
+            "HD Ifosfamide": "2000100070"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.regimen"
       }
     ]
   },
@@ -3719,7 +3466,7 @@
             "therapeutic (without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.chemotherapyInfo"
       },
       {
         "parameter_name": "provide date",
@@ -3731,7 +3478,7 @@
         "parameter_name": "provide number",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.endDateSystemicTreatment"
       },
       {
         "parameter_name": "select reason",
@@ -3756,7 +3503,7 @@
             "unknown": "UNK"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.reasonForEndOfTreatment"
       }
     ]
   },
@@ -3779,7 +3526,7 @@
             "therapeutic (without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.chemotherapyInfo"
       },
       {
         "parameter_name": "select response type",
@@ -3801,7 +3548,7 @@
             "unknown": "4129922"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment_treatmentResponse"
       }
     ]
   },
@@ -3827,7 +3574,7 @@
             "therapeutic (radiotherapy without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.setting"
       },
       {
         "parameter_name": "select method",
@@ -3856,26 +3603,19 @@
             "prolongation of life": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.intent"
       },
       {
         "parameter_name": "please select where",
-        "parameter_type": "ENUM",
-        "possible_values": [
-          {
-            "at the hosptial": ""
-          },
-          {
-            "outside of the hospital": ""
-          }
-        ],
-        "associated_variable": ""
+        "parameter_type": "TEXT",
+        "possible_values": [],
+        "associated_variable": "Radiotherapy.radiotherapyHospital"
       },
       {
         "parameter_name": "put date",
         "parameter_type": "DATE",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.startDate"
       }
     ]
   },
@@ -3979,13 +3719,13 @@
             "metastatic site": ""
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.setting"
       },
       {
         "parameter_name": "provide list of sites if metastasis",
         "parameter_type": "TEXT",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.treatmentSiteDistantMetastasis"
       }
     ]
   },
@@ -4011,7 +3751,7 @@
             "therapeutic (radiotherapy without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.setting"
       },
       {
         "parameter_name": "select response type",
@@ -4033,7 +3773,7 @@
             "unknown": "4129922"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.treatmentResponse"
       }
     ]
   },
@@ -4046,13 +3786,13 @@
         "parameter_name": "mitoses count",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis_biopsyMitoticCount"
       },
       {
         "parameter_name": "number of HPFs",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyMitoticCount"
       }
     ]
   },
@@ -4065,13 +3805,13 @@
         "parameter_name": "mitoses count",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyMitoticCount"
       },
       {
         "parameter_name": "area",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyMitoticCount"
       }
     ]
   },
@@ -4091,22 +3831,22 @@
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "1": ""
+            "1": "1634371"
           },
           {
-            "2": ""
+            "2": "1634752"
           },
           {
-            "3": ""
+            "3": "1633749"
           },
           {
-            "Other classification system high": ""
+            "Other classification system high": "1635587"
           },
           {
-            "Other classification system low": ""
+            "Other classification system low": "1634085"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.biopsyGrading"
       }
     ]
   },
