@@ -328,6 +328,239 @@ def extract_dates_from_annotation(annotation: str) -> List[str]:
     return dates
 
 
+# --- Special handlers registry (annotation_id -> callable) ---
+SPECIAL_HANDLERS: Dict[str, callable] = {}
+
+
+def register_special_handler(annotation_id: str, handler: callable):
+    SPECIAL_HANDLERS[str(annotation_id)] = handler
+
+
+# --- NEW: Post-default special handlers (run after default logic to reuse record_id) ---
+SPECIAL_HANDLERS_AFTER: Dict[str, callable] = {}
+
+
+def register_special_handler_after(annotation_id: str, handler: callable):
+    SPECIAL_HANDLERS_AFTER[str(annotation_id)] = handler
+
+# --- Helpers shared by handlers and regex processing ---
+
+
+def _to_str(val) -> str:
+    try:
+        return str(val).strip()
+    except Exception:
+        return ""
+
+
+def _is_placeholder(text: str) -> bool:
+    s = _to_str(text).lower()
+    if not s:
+        return True
+    if s in {"n/a", "na", "none", "null", "unknown", "unk", "-", "--"}:
+        return True
+    # [provide date], [select regimen], [something]
+    if re.fullmatch(r"\[[^\]]+\]", s or ""):
+        return True
+    return False
+
+
+def _is_invalid_value(param_type: str, value) -> bool:
+    # Treat NaN/None/empty and placeholders as invalid
+    if value is None:
+        return True
+    try:
+        if pandas.isna(value):
+            return True
+    except Exception:
+        pass
+    s = _to_str(value)
+    if not s:
+        return True
+    if _is_placeholder(s):
+        return True
+    # Optional: for DATE, enforce basic date pattern
+    if param_type == "DATE":
+        if not re.search(r"\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}", s):
+            return True
+    return False
+
+
+def _is_duplicate_row(excel_data: pandas.DataFrame, staged_rows: List[dict],
+                      patient_id: str, core_variable: str, value, date_ref: str) -> bool:
+    # Check duplicates in existing excel_data
+    if "patient_id" in excel_data.columns and not excel_data.empty:
+        existing_rows = excel_data[excel_data["patient_id"] == patient_id]
+        if not existing_rows.empty:
+            dup = existing_rows[
+                (existing_rows["core_variable"] == core_variable) &
+                (existing_rows["value"].astype(str) == _to_str(value)) &
+                (existing_rows["date_ref"].astype(str) == _to_str(date_ref))
+            ]
+            if not dup.empty:
+                return True
+    # Check duplicates in rows staged during current run
+    for r in staged_rows:
+        if (r.get("patient_id") == patient_id and
+            r.get("core_variable") == core_variable and
+            _to_str(r.get("value")) == _to_str(value) and
+                _to_str(r.get("date_ref")) == _to_str(date_ref)):
+            return True
+    return False
+
+# --- Example special handler: Radiotherapy site (217/261) ---
+
+
+def _handle_radiotherapy_site(ctx: dict) -> List[dict]:
+    """
+    Special handling for 'Radiotherapy site':
+    - Let default regex flow handle the first parameter (select site).
+    - If the first parameter indicates 'metastatic site', parse the second parameter (comma-separated list)
+      and emit boolean flags for the following variables:
+        - Radiotherapy.metastaticTreatmentSiteLung
+        - Radiotherapy.metastaticTreatmentSiteMediastinum
+        - Radiotherapy.metastaticTreatmentSiteBone
+        - Radiotherapy.metastaticTreatmentSiteSoftTissue
+        - Radiotherapy.metastaticTreatmentSiteLiver
+    """
+    match = ctx["match"]
+    patient_id = ctx["patient_id"]
+    date = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+
+    # Regex 261 captures: (site_category) (details)
+    site_category = _to_str(match[0]) if len(match) > 0 else ""
+    details = _to_str(match[1]) if len(match) > 1 else ""
+
+    rows: List[dict] = []
+
+    # Only handle the second parameter when metastatic site is selected.
+    if "metastatic" in site_category.lower():
+        # Expected comma-separated list
+        tokens = [t.strip().lower()
+                  for t in details.split(",") if t and t.strip()]
+        # Normalize some common variants
+        normalized = set()
+        for t in tokens:
+            t_norm = t.replace("-", " ").replace("_", " ").strip()
+            normalized.add(t_norm)
+
+        # Map normalized tokens to boolean variables
+        site_var_map = {
+            "lung": "Radiotherapy.metastaticTreatmentSiteLung",
+            "mediastinum": "Radiotherapy.metastaticTreatmentSiteMediastinum",
+            "bone": "Radiotherapy.metastaticTreatmentSiteBone",
+            "soft tissue": "Radiotherapy.metastaticTreatmentSiteSoftTissue",
+            "liver": "Radiotherapy.metastaticTreatmentSiteLiver",
+        }
+
+        # Soft tissue: allow prefixes like "soft" and phrases like "soft tissue", "soft-tissue"
+        def matches_soft_tissue(token: str) -> bool:
+            return token.startswith("soft") or "soft tissue" in token
+
+        for token in normalized:
+            if token == "lung":
+                var = site_var_map["lung"]
+            elif token == "mediastinum":
+                var = site_var_map["mediastinum"]
+            elif token == "bone":
+                var = site_var_map["bone"]
+            elif token == "liver":
+                var = site_var_map["liver"]
+            elif matches_soft_tissue(token):
+                var = site_var_map["soft tissue"]
+            else:
+                continue  # ignore tokens not in the requested set
+
+            rows.append({
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": var,
+                "date_ref": date,
+                "value": True,       # boolean TRUE
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "boolean"
+            })
+
+    return rows
+
+
+# Register handlers for both dictionary id 217 and regexp id 261
+register_special_handler("217", _handle_radiotherapy_site)
+register_special_handler("261", _handle_radiotherapy_site)
+
+# --- NEW: Post-default handler for Isolated limb perfusion drugs (211) ---
+
+
+def _handle_ilp_drugs(ctx: dict) -> List[dict]:
+    """
+    For annotation 211:
+      - Default logic handles the first parameter (DATE) and creates IsolatedLimbPerfusion.startDate with a record_id.
+      - This handler parses the second parameter (list drugs, comma-separated) and emits, for each drug:
+          1) DrugsForTreatments.isolatedLimbPerfusion = True (boolean), with record_id = base_record_id
+          2) DrugsForTreatments.drug = <drug name> (string), with record_id = base_record_id
+    ctx keys expected:
+      - match: tuple(str date, str list_drugs)
+      - patient_id, date, note_id, prompt_type
+      - base_record_id: int (record_id assigned to the DATE row)
+    """
+    match = ctx["match"]
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    base_record_id = ctx.get("base_record_id")
+
+    rows: List[dict] = []
+    if base_record_id is None:
+        # Without the base record id we cannot link rows; skip safely
+        return rows
+
+    # Extract comma-separated drugs from match[1]
+    details = _to_str(match[1]) if len(match) > 1 else ""
+    if not details:
+        return rows
+
+    # split by comma; trim tokens; ignore empties
+    tokens = [t.strip() for t in details.split(",") if t and t.strip()]
+    if not tokens:
+        return rows
+
+    for drug in tokens:
+        # Boolean flag for ILP present in treatment (linked to same record_id)
+        rows.append({
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "DrugsForTreatments.isolatedLimbPerfusion",
+            "date_ref": date_ref,
+            "value": True,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "boolean",
+            "record_id": base_record_id  # preserve linkage
+        })
+        # Drug name row (linked to same record_id)
+        rows.append({
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "DrugsForTreatments.drug",
+            "date_ref": date_ref,
+            "value": drug,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "string",
+            "record_id": base_record_id  # preserve linkage
+        })
+
+    return rows
+
+
+# Register post-default handler for 211
+register_special_handler_after("211", _handle_ilp_drugs)
+
+
 def process_llm_annotations_with_regex(
     llm_annotations: pandas.DataFrame,
     excel_data: pandas.DataFrame,
@@ -421,44 +654,6 @@ def process_llm_annotations_with_regex(
 
     print(f"[DEBUG] Starting record_id: {max_record_id}")
 
-    # Helpers to avoid appending empty/placeholder values
-    def _to_str(val) -> str:
-        try:
-            return str(val).strip()
-        except Exception:
-            return ""
-
-    def _is_placeholder(text: str) -> bool:
-        s = _to_str(text).lower()
-        if not s:
-            return True
-        if s in {"n/a", "na", "none", "null", "unknown", "unk", "-", "--"}:
-            return True
-        # [provide date], [select regimen], [something]
-        if re.fullmatch(r"\[[^\]]+\]", s or ""):
-            return True
-        return False
-
-    def _is_invalid_value(param_type: str, value) -> bool:
-        # Treat NaN/None/empty and placeholders as invalid
-        if value is None:
-            return True
-        try:
-            if pandas.isna(value):
-                return True
-        except Exception:
-            pass
-        s = _to_str(value)
-        if not s:
-            return True
-        if _is_placeholder(s):
-            return True
-        # Optional: for DATE, enforce basic date pattern hint
-        if param_type == "DATE":
-            if not re.search(r"\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}", s):
-                return True
-        return False
-
     # Process each LLM annotation
     new_rows = []
     annotation_count = 0
@@ -529,7 +724,6 @@ def process_llm_annotations_with_regex(
             f"[DEBUG] Checking against {len(summary_dict)} annotation patterns...")
 
         for annotation_id, annotation_data in summary_dict.items():
-
             # Check if there are parameters defined
             if "parameters" not in annotation_data or not annotation_data["parameters"]:
                 # print(
@@ -570,12 +764,31 @@ def process_llm_annotations_with_regex(
                                 "prompt_type": prompt_type
                             }
                             new_rows.append(new_row)
-                            # print(f"[DEBUG]     ✓ Added new row: {new_row}")
-                #     else:
-                #         print(
-                #             f"[DEBUG]     No associated_variable found in parameters")
-                # else:
-                #     print(f"[DEBUG]     ✗ No content match")
+
+                            # --- NEW: validate and deduplicate parameterless rows ---
+                            assoc_var_str = _to_str(assoc_var)
+                            if not assoc_var_str or _is_invalid_value("TEXT", value):
+                                print(
+                                    f"[WARN]     ✗ Invalid parameterless row (var/value). Skipping.")
+                                continue
+                            if _is_duplicate_row(excel_data, new_rows, patient_id, assoc_var_str, value, date):
+                                print(
+                                    f"[DEBUG]     ✗ Duplicate parameterless row detected. Skipping.")
+                                continue
+                            # Only now assign record_id and append
+                            max_record_id += 1
+                            new_row = {
+                                "patient_id": patient_id,
+                                "original_source": "NLP_LLM",
+                                "core_variable": assoc_var_str,
+                                "date_ref": date,
+                                "value": value,
+                                "record_id": max_record_id,
+                                "note_id": note_id,
+                                "prompt_type": prompt_type
+                            }
+                            new_rows.append(new_row)
+                            # -------------------------------------------------------
                 continue
 
             # Get the regex pattern for the current annotation
@@ -614,50 +827,58 @@ def process_llm_annotations_with_regex(
 
                 # Process each match
                 for match_index, match in enumerate(matches):
-                    # print(
-                    #     f"[DEBUG]     Processing match {match_index + 1}/{len(matches)}: {match}")
+                    # --- existing pre-default special handler hook ---
+                    handler = SPECIAL_HANDLERS.get(str(annotation_id))
+                    if handler:
+                        ctx = {
+                            "annotation_id": str(annotation_id),
+                            "annotation_data": annotation_data,
+                            "match": match,
+                            "patient_id": patient_id,
+                            "date": date,
+                            "note_id": note_id,
+                            "prompt_type": prompt_type,
+                            "excel_data": excel_data
+                        }
+                        special_rows = handler(ctx)
+                        appended = 0
+                        for sr in special_rows:
+                            cv = _to_str(sr.get("core_variable", ""))
+                            val = sr.get("value")
+                            if not cv or _is_invalid_value("TEXT", val):
+                                print(
+                                    f"[DEBUG]       Skipping special row with empty/invalid fields: {sr}")
+                                continue
+                            if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
+                                continue
+                            # Respect provided record_id if present; otherwise allocate a new one
+                            if "record_id" in sr and _to_str(sr["record_id"]):
+                                pass  # keep provided record_id; do not change max_record_id
+                            else:
+                                max_record_id += 1
+                                sr["record_id"] = max_record_id
+                            sr.setdefault("types", "string")
+                            new_rows.append(sr)
+                            appended += 1
+                        # Do NOT skip default logic
+                    # --- END pre-default special handler hook ---
 
-                    # Check if there is parameter_data for the current match
+                    # Default logic (unchanged) with capture for base_record_id (211)
                     param_index = match_index if match_index < len(
                         annotation_data["parameters"]) else 0
-                    # print(
-                    #     f"[DEBUG]       Using parameter index: {param_index}")
-
                     parameter_data = annotation_data["parameters"][param_index]
-                    # if not parameter_data:
-                    #     print(f"[WARN]       No parameter_data found, skipping")
-                    #     continue
-
-                    # Check if associated_variable is present
-                    # if "associated_variable" not in parameter_data or not parameter_data["associated_variable"]:
-                    #     print(
-                    #         f"[WARN]       No associated_variable in parameter_data, skipping")
-                    #     continue
 
                     assoc_var = parameter_data["associated_variable"]
                     param_type = parameter_data.get(
                         "parameter_type", "DEFAULT")
 
-                    # print(f"[DEBUG]       Associated variable: {assoc_var}")
-                    # print(f"[DEBUG]       Parameter type: {param_type}")
-
-                    # Increment record_id for each new entity
-                    max_record_id += 1
-
                     # Determine the value based on parameter_type
                     if param_type == "ENUM":
-                        # print(f"[DEBUG]       Processing as ENUM")
-
                         # Map captured value to concept_id
                         possible_values = parameter_data.get(
                             "possible_values", [])
                         captured_value = match[0] if isinstance(
                             match, tuple) and len(match) > 0 else match
-
-                        # print(
-                        #     f"[DEBUG]       Captured value: '{captured_value}'")
-                        # print(
-                        #     f"[DEBUG]       Possible values: {possible_values}")
 
                         value = None
                         for pv_dict in possible_values:
@@ -702,43 +923,121 @@ def process_llm_annotations_with_regex(
                         skipped_count += 1
                         continue
 
-                    # Check for duplicates
-                    is_duplicate = False
-                    if "patient_id" in excel_data.columns and not excel_data.empty:
-                        existing_rows = excel_data[excel_data["patient_id"]
-                                                   == patient_id]
-                        if not existing_rows.empty:
-                            duplicate_check = existing_rows[
-                                (existing_rows["core_variable"] == assoc_var_str) &
-                                (existing_rows["value"].astype(str) == _to_str(value)) &
-                                (existing_rows["date_ref"].astype(
-                                    str) == _to_str(date))
-                            ]
-                            is_duplicate = not duplicate_check.empty
-                            if is_duplicate:
-                                print(
-                                    f"[DEBUG]       ✗ Duplicate detected, skipping")
+                    # NEW: unified duplicate check (existing excel + staged rows)
+                    if _is_duplicate_row(excel_data, new_rows, patient_id, assoc_var_str, value, date):
+                        print(
+                            f"[DEBUG]       ✗ Duplicate detected (existing or staged), skipping")
+                        skipped_count += 1
+                        # --- Capture base_record_id if we skipped adding due to duplicate ---
+                        base_record_id = None
+                        if str(annotation_id) in SPECIAL_HANDLERS_AFTER and (
+                            assoc_var_str == "IsolatedLimbPerfusion.startDate"
+                            or (str(annotation_id) == "240" and assoc_var_str == "CancerEpisode.cancerStartDate")
+                        ):
+                            # try find existing record_id in excel_data or staged rows
+                            base_record_id = None
+                            if not excel_data.empty:
+                                exist = excel_data[
+                                    (excel_data["patient_id"] == patient_id) &
+                                    (excel_data["core_variable"] == assoc_var_str) &
+                                    (excel_data["date_ref"].astype(
+                                        str) == _to_str(date))
+                                ]
+                                if not exist.empty and "record_id" in exist.columns:
+                                    try:
+                                        base_record_id = int(
+                                            exist.iloc[0]["record_id"])
+                                    except Exception:
+                                        base_record_id = None
+                            if base_record_id is None:
+                                # search staged rows
+                                for r in reversed(new_rows):
+                                    if r.get("patient_id") == patient_id and r.get("core_variable") == assoc_var_str and _to_str(r.get("date_ref")) == _to_str(date):
+                                        base_record_id = r.get("record_id")
+                                        break
+                        # If post-handler present and we have base_record_id, run it now
+                        post_handler = SPECIAL_HANDLERS_AFTER.get(
+                            str(annotation_id))
+                        if post_handler and base_record_id:
+                            ctx_after = {
+                                "annotation_id": str(annotation_id),
+                                "annotation_data": annotation_data,
+                                "match": match,
+                                "patient_id": patient_id,
+                                "date": date,
+                                "note_id": note_id,
+                                "prompt_type": prompt_type,
+                                "excel_data": excel_data,
+                                "staged_rows": new_rows,
+                                "base_record_id": base_record_id
+                            }
+                            post_rows = post_handler(ctx_after)
+                            for sr in post_rows:
+                                cv = _to_str(sr.get("core_variable", ""))
+                                val = sr.get("value")
+                                if not cv or _is_invalid_value("TEXT", val):
+                                    continue
+                                if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
+                                    continue
+                                # keep provided record_id
+                                sr.setdefault("types", "string")
+                                new_rows.append(sr)
+                        continue
 
-                    if not is_duplicate:
-                        new_row = {
+                    # Only now assign record_id and append
+                    max_record_id += 1
+                    new_row = {
+                        "patient_id": patient_id,
+                        "original_source": "NLP_LLM",
+                        "core_variable": assoc_var_str,
+                        "date_ref": date,
+                        "value": value,
+                        "record_id": max_record_id,
+                        "note_id": note_id,
+                        "prompt_type": prompt_type,
+                        "types": types_map.get(param_type, "NOT SPECIFIED")
+                    }
+                    new_rows.append(new_row)
+
+                    # --- NEW: After-default special handler hook (e.g., 211 needs base_record_id) ---
+                    post_handler = SPECIAL_HANDLERS_AFTER.get(
+                        str(annotation_id))
+                    if post_handler and (
+                        assoc_var_str == "IsolatedLimbPerfusion.startDate"
+                        or (str(annotation_id) == "240" and assoc_var_str == "CancerEpisode.cancerStartDate")
+                    ):
+                        base_record_id = max_record_id  # record_id just assigned to the DATE row
+                        ctx_after = {
+                            "annotation_id": str(annotation_id),
+                            "annotation_data": annotation_data,
+                            "match": match,
                             "patient_id": patient_id,
-                            "original_source": "NLP_LLM",
-                            "core_variable": assoc_var_str,
-                            "date_ref": date,
-                            "value": value,
-                            "record_id": max_record_id,
+                            "date": date,
                             "note_id": note_id,
                             "prompt_type": prompt_type,
-                            "types": types_map.get(param_type, "NOT SPECIFIED")
+                            "excel_data": excel_data,
+                            "staged_rows": new_rows,
+                            "base_record_id": base_record_id
                         }
-                        new_rows.append(new_row)
-                        # print(f"[DEBUG]       ✓ Added new row: record_id={max_record_id}, var={assoc_var_str}, val={value}")
-                    else:
-                        skipped_count += 1
-
-        if not annotation_matched:
-            print(f"[DEBUG]   ⚠ No patterns matched for this annotation")
-
+                        post_rows = post_handler(ctx_after)
+                        for sr in post_rows:
+                            cv = _to_str(sr.get("core_variable", ""))
+                            val = sr.get("value")
+                            if not cv or _is_invalid_value("TEXT", val):
+                                print(
+                                    f"[DEBUG]       Skipping post-special row with empty/invalid fields: {sr}")
+                                continue
+                            if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
+                                continue
+                            # Respect provided record_id (base_record_id)
+                            if "record_id" in sr and _to_str(sr["record_id"]):
+                                pass
+                            else:
+                                max_record_id += 1
+                                sr["record_id"] = max_record_id
+                            sr.setdefault("types", "string")
+                            new_rows.append(sr)
+                    # --- END After-default special handler hook ---
     print("\n[DEBUG] ========================================")
     print("[DEBUG] Processing Summary:")
     print(f"[DEBUG]   Total annotations processed: {len(llm_annotations)}")
