@@ -25,6 +25,8 @@ def build_task_index(task_key: str, df: pd.DataFrame, text_col="note_original_te
     meta = {"task": task_key, "dim": int(X.shape[1]), "size": int(X.shape[0])}
     (OUT_DIR / f"{task_key}.json").write_text(json.dumps(meta, indent=2))
 
+    print(f"[INFO] FAISS index and metadata for task '{task_key}' built successfully.")
+
 # Example: build from your existing filtered DataFrames
 # histology_df = ...  # same filtering you do now in your script
 # build_task_index("histology", histology_df)

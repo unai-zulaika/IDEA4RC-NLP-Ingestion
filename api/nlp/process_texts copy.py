@@ -50,17 +50,9 @@ import pandas
 import re
 from pathlib import Path
 import json
-from typing import Dict, List
-
-from nlp.model_runner import get_prompt, init_model, load_prompts_from_json, run_model_with_prompt
-from nlp.processing_utils import (
-    first_group as _first_group,
-    is_duplicate_row as _is_duplicate_row,
-    is_invalid_value as _is_invalid_value,
-    to_str as _to_str,
-    parse_date_any as _parse_date_any,  # <-- added
-)
-from nlp.special_handlers import SPECIAL_HANDLERS, SPECIAL_HANDLERS_AFTER
+from typing import List, Dict
+from datetime import datetime  # NEW
+from nlp.model_runner import load_prompts_from_json, get_prompt, run_model_with_prompt, init_model
 
 
 types_map = {
@@ -337,6 +329,332 @@ def extract_dates_from_annotation(annotation: str) -> List[str]:
     return dates
 
 
+# --- Special handlers registry (annotation_id -> callable) ---
+SPECIAL_HANDLERS: Dict[str, callable] = {}
+
+
+def register_special_handler(annotation_id: str, handler: callable):
+    SPECIAL_HANDLERS[str(annotation_id)] = handler
+
+
+# --- NEW: Post-default special handlers (run after default logic to reuse record_id) ---
+SPECIAL_HANDLERS_AFTER: Dict[str, callable] = {}
+
+
+def register_special_handler_after(annotation_id: str, handler: callable):
+    SPECIAL_HANDLERS_AFTER[str(annotation_id)] = handler
+
+# --- Helpers shared by handlers and regex processing ---
+
+
+def _to_str(val) -> str:
+    try:
+        return str(val).strip()
+    except Exception:
+        return ""
+
+
+def _is_placeholder(text: str) -> bool:
+    s = _to_str(text).lower()
+    if not s:
+        return True
+    if s in {"n/a", "na", "none", "null", "unknown", "unk", "-", "--"}:
+        return True
+    # [provide date], [select regimen], [something]
+    if re.fullmatch(r"\[[^\]]+\]", s or ""):
+        return True
+    return False
+
+
+def _is_invalid_value(param_type: str, value) -> bool:
+    # Treat NaN/None/empty and placeholders as invalid
+    if value is None:
+        return True
+    try:
+        if pandas.isna(value):
+            return True
+    except Exception:
+        pass
+    s = _to_str(value)
+    if not s:
+        return True
+    if _is_placeholder(s):
+        return True
+    # Optional: for DATE, enforce basic date pattern
+    if param_type == "DATE":
+        if not re.search(r"\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}", s):
+            return True
+    return False
+
+
+def _is_duplicate_row(excel_data: pandas.DataFrame, staged_rows: List[dict],
+                      patient_id: str, core_variable: str, value, date_ref: str) -> bool:
+    # Check duplicates in existing excel_data
+    if "patient_id" in excel_data.columns and not excel_data.empty:
+        existing_rows = excel_data[excel_data["patient_id"] == patient_id]
+        if not existing_rows.empty:
+            dup = existing_rows[
+                (existing_rows["core_variable"] == core_variable) &
+                (existing_rows["value"].astype(str) == _to_str(value)) &
+                (existing_rows["date_ref"].astype(str) == _to_str(date_ref))
+            ]
+            if not dup.empty:
+                return True
+    # Check duplicates in rows staged during current run
+    for r in staged_rows:
+        if (r.get("patient_id") == patient_id and
+            r.get("core_variable") == core_variable and
+            _to_str(r.get("value")) == _to_str(value) and
+                _to_str(r.get("date_ref")) == _to_str(date_ref)):
+            return True
+    return False
+
+# --- NEW: small helpers ---
+def _parse_date_any(s: str):
+    if not s:
+        return None
+    s = _to_str(s)
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            from datetime import datetime as _dt
+            return _dt.strptime(s, fmt)
+        except Exception:
+            pass
+    return None
+
+def _first_group(match):
+    return match[0] if isinstance(match, tuple) and len(match) > 0 else match
+
+# --- Example special handler: Radiotherapy site (217/261) ---
+
+
+def _handle_radiotherapy_site(ctx: dict) -> List[dict]:
+    """
+    Special handling for 'Radiotherapy site':
+    - Let default regex flow handle the first parameter (select site).
+    - If the first parameter indicates 'metastatic site', parse the second parameter (comma-separated list)
+      and emit boolean flags for the following variables:
+        - Radiotherapy.metastaticTreatmentSiteLung
+        - Radiotherapy.metastaticTreatmentSiteMediastinum
+        - Radiotherapy.metastaticTreatmentSiteBone
+        - Radiotherapy.metastaticTreatmentSiteSoftTissue
+        - Radiotherapy.metastaticTreatmentSiteLiver
+    """
+    match = ctx["match"]
+    patient_id = ctx["patient_id"]
+    date = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+
+    # Regex 261 captures: (site_category) (details)
+    site_category = _to_str(match[0]) if len(match) > 0 else ""
+    details = _to_str(match[1]) if len(match) > 1 else ""
+
+    rows: List[dict] = []
+
+    # Only handle the second parameter when metastatic site is selected.
+    if "metastatic" in site_category.lower():
+        # Expected comma-separated list
+        tokens = [t.strip().lower()
+                  for t in details.split(",") if t and t.strip()]
+        # Normalize some common variants
+        normalized = set()
+        for t in tokens:
+            t_norm = t.replace("-", " ").replace("_", " ").strip()
+            normalized.add(t_norm)
+
+        # Map normalized tokens to boolean variables
+        site_var_map = {
+            "lung": "Radiotherapy.metastaticTreatmentSiteLung",
+            "mediastinum": "Radiotherapy.metastaticTreatmentSiteMediastinum",
+            "bone": "Radiotherapy.metastaticTreatmentSiteBone",
+            "soft tissue": "Radiotherapy.metastaticTreatmentSiteSoftTissue",
+            "liver": "Radiotherapy.metastaticTreatmentSiteLiver",
+        }
+
+        # Soft tissue: allow prefixes like "soft" and phrases like "soft tissue", "soft-tissue"
+        def matches_soft_tissue(token: str) -> bool:
+            return token.startswith("soft") or "soft tissue" in token
+
+        for token in normalized:
+            if token == "lung":
+                var = site_var_map["lung"]
+            elif token == "mediastinum":
+                var = site_var_map["mediastinum"]
+            elif token == "bone":
+                var = site_var_map["bone"]
+            elif token == "liver":
+                var = site_var_map["liver"]
+            elif matches_soft_tissue(token):
+                var = site_var_map["soft tissue"]
+            else:
+                continue  # ignore tokens not in the requested set
+
+            rows.append({
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": var,
+                "date_ref": date,
+                "value": True,       # boolean TRUE
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "boolean"
+            })
+
+    return rows
+
+
+# Register handlers for both dictionary id 217 and regexp id 261
+register_special_handler("217", _handle_radiotherapy_site)
+register_special_handler("261", _handle_radiotherapy_site)
+
+# --- NEW: Post-default handler for Isolated limb perfusion drugs (211) ---
+
+
+def _handle_ilp_drugs(ctx: dict) -> List[dict]:
+    """
+    For annotation 211:
+      - Default logic handles the first parameter (DATE) and creates IsolatedLimbPerfusion.startDate with a record_id.
+      - This handler parses the second parameter (list drugs, comma-separated) and emits, for each drug:
+          1) DrugsForTreatments.isolatedLimbPerfusion = True (boolean), with record_id = base_record_id
+          2) DrugsForTreatments.drug = <drug name> (string), with record_id = base_record_id
+    ctx keys expected:
+      - match: tuple(str date, str list_drugs)
+      - patient_id, date, note_id, prompt_type
+      - base_record_id: int (record_id assigned to the DATE row)
+    """
+    match = ctx["match"]
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    base_record_id = ctx.get("base_record_id")
+
+    rows: List[dict] = []
+    if base_record_id is None:
+        # Without the base record id we cannot link rows; skip safely
+        return rows
+
+    # Extract comma-separated drugs from match[1]
+    details = _to_str(match[1]) if len(match) > 1 else ""
+    if not details:
+        return rows
+
+    # split by comma; trim tokens; ignore empties
+    tokens = [t.strip() for t in details.split(",") if t and t.strip()]
+    if not tokens:
+        return rows
+
+    for drug in tokens:
+        # Boolean flag for ILP present in treatment (linked to same record_id)
+        rows.append({
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "DrugsForTreatments.isolatedLimbPerfusion",
+            "date_ref": date_ref,
+            "value": True,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "boolean",
+            "record_id": base_record_id  # preserve linkage
+        })
+        # Drug name row (linked to same record_id)
+        rows.append({
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "DrugsForTreatments.drug",
+            "date_ref": date_ref,
+            "value": drug,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "string",
+            "record_id": base_record_id  # preserve linkage
+        })
+
+    return rows
+
+
+# Register post-default handler for 211
+register_special_handler_after("211", _handle_ilp_drugs)
+
+# --- NEW: Post-default handler to link EpisodeEvent -> CancerEpisode (241) ---
+def _handle_episode_event_link(ctx: dict) -> List[dict]:
+    patient_id = ctx["patient_id"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    excel_data: pandas.DataFrame = ctx.get("excel_data")
+    staged_rows: List[dict] = ctx.get("staged_rows", [])
+    base_record_id = ctx.get("base_record_id")
+
+    # Find EpisodeEvent.dateOfEpisode value for this record group
+    episode_date_str = None
+    for r in reversed(staged_rows):
+        if (
+            r.get("record_id") == base_record_id
+            and r.get("patient_id") == patient_id
+            and r.get("core_variable") == "EpisodeEvent.dateOfEpisode"
+            and _to_str(r.get("value"))
+        ):
+            episode_date_str = _to_str(r.get("value"))
+            break
+    if not episode_date_str:
+        episode_date_str = _to_str(ctx.get("date"))
+    episode_dt = _parse_date_any(episode_date_str)
+    if not base_record_id or not episode_dt:
+        return []
+
+    # Collect candidate CancerEpisode.cancerStartDate rows
+    candidates = []
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty and "core_variable" in excel_data.columns:
+        for _, r in excel_data.iterrows():
+            if _to_str(r.get("patient_id")) != _to_str(patient_id):
+                continue
+            if r.get("core_variable") != "CancerEpisode.cancerStartDate":
+                continue
+            rid = r.get("record_id")
+            start_date_str = _to_str(r.get("value")) or _to_str(r.get("date_ref"))
+            sd = _parse_date_any(start_date_str)
+            if sd and rid is not None:
+                try:
+                    candidates.append((sd, int(rid)))
+                except Exception:
+                    pass
+    for r in staged_rows:
+        if (
+            _to_str(r.get("patient_id")) == _to_str(patient_id)
+            and r.get("core_variable") == "CancerEpisode.cancerStartDate"
+            and _to_str(r.get("record_id"))
+        ):
+            start_date_str = _to_str(r.get("value")) or _to_str(r.get("date_ref"))
+            sd = _parse_date_any(start_date_str)
+            if sd:
+                try:
+                    candidates.append((sd, int(r.get("record_id"))))
+                except Exception:
+                    pass
+
+    if not candidates:
+        return []
+    before = [(d, rid) for d, rid in candidates if d <= episode_dt]
+    if not before:
+        return []
+
+    _, linked_episode_id = max(before, key=lambda x: x[0])
+    return [{
+        "patient_id": patient_id,
+        "original_source": "NLP_LLM",
+        "core_variable": "EpisodeEvent.cancerEpisode",
+        "date_ref": episode_date_str,
+        "value": linked_episode_id,
+        "note_id": note_id,
+        "prompt_type": prompt_type,
+        "types": "reference",
+        "record_id": base_record_id
+    }]
+
+# Register post-default handler for 241
+register_special_handler_after("241", _handle_episode_event_link)
+
 def process_llm_annotations_with_regex(
     llm_annotations: pandas.DataFrame,
     excel_data: pandas.DataFrame,
@@ -391,13 +709,9 @@ def process_llm_annotations_with_regex(
         ])
 
     # Normalize column names for compatibility
-    # Common alternate column names -> normalize to patient_id
-    if "patient_id" not in excel_data.columns:
-        for alt in ("p_id", "excel_data_dfpatient_id", "patient", "patientId"):
-            if alt in excel_data.columns:
-                print(f"[DEBUG] Renaming '{alt}' to 'patient_id' in excel_data")
-                excel_data["patient_id"] = excel_data[alt]
-                break
+    if "patient_id" not in excel_data.columns and "p_id" in excel_data.columns:
+        print("[DEBUG] Renaming 'p_id' to 'patient_id' in excel_data")
+        excel_data["patient_id"] = excel_data["p_id"]
 
     # Load regex dictionaries
     print("[DEBUG] Loading regex dictionaries...")
@@ -482,10 +796,13 @@ def process_llm_annotations_with_regex(
                     extracted_dates) if extracted_dates else []
             except Exception:
                 extracted_dates = []
-        if extracted_dates:
-            print(f"[DEBUG] Ignoring extracted date(s) from annotation: {extracted_dates}")
-        date = note_date
-        print(f"[DEBUG] Using note date: {date}")
+
+        if extracted_dates and len(extracted_dates) > 0:
+            date = extracted_dates[0]
+            print(f"[DEBUG] Using extracted date: {date}")
+        else:
+            date = note_date
+            print(f"[DEBUG] No extracted date, using note date: {date}")
 
         # Skip error annotations
         if str(annotation_text).startswith("ERROR:"):
@@ -615,8 +932,7 @@ def process_llm_annotations_with_regex(
                             "date": date,
                             "note_id": note_id,
                             "prompt_type": prompt_type,
-                            "excel_data": excel_data,
-                            "staged_rows": new_rows
+                            "excel_data": excel_data
                         }
                         special_rows = handler(ctx)
                         appended = 0
@@ -631,10 +947,7 @@ def process_llm_annotations_with_regex(
                                 continue
                             # Respect provided record_id if present; otherwise allocate a new one
                             if "record_id" in sr and _to_str(sr["record_id"]):
-                                try:
-                                    max_record_id = max(max_record_id, int(sr["record_id"]))
-                                except (TypeError, ValueError):
-                                    pass
+                                pass  # keep provided record_id; do not change max_record_id
                             else:
                                 max_record_id += 1
                                 sr["record_id"] = max_record_id
@@ -652,7 +965,6 @@ def process_llm_annotations_with_regex(
                     assoc_var = parameter_data["associated_variable"]
                     param_type = parameter_data.get(
                         "parameter_type", "DEFAULT")
-                    assoc_var_str = _to_str(assoc_var)  # <-- precompute for special cases
 
                     # Determine the value based on parameter_type
                     if param_type == "ENUM":
@@ -676,22 +988,6 @@ def process_llm_annotations_with_regex(
                     elif param_type in ["DATE", "NUMBER", "TEXT"]:
                         value = _first_group(match)
                         print(f"[DEBUG]       Extracted {param_type} value: {value}")
-                        # --- special case: annotation 74 provides age; compute birth year from note date ---
-                        if str(annotation_id) == "74" and assoc_var_str == "Patient.birthYear":
-                            dt = _parse_date_any(_to_str(date))
-                            try:
-                                age_years = float(_to_str(value))
-                            except Exception:
-                                print(f"[WARN]       ✗ Invalid age '{value}' for birth year computation. Skipping row.")
-                                skipped_count += 1
-                                continue
-                            if not dt:
-                                print(f"[WARN]       ✗ Invalid/missing note date '{date}' for birth year computation. Skipping row.")
-                                skipped_count += 1
-                                continue
-                            birth_year = int(dt.year - int(age_years))
-                            value = birth_year
-                            print(f"[DEBUG]       Computed Patient.birthYear = {birth_year} from age {age_years} and note year {dt.year}")
                     elif param_type == "DEFAULT":
                         value = parameter_data.get("value", match)
                         print(f"[DEBUG]       Using DEFAULT value: {value}")
@@ -700,6 +996,7 @@ def process_llm_annotations_with_regex(
                         print(f"[DEBUG]       Using raw match value: {value}")
 
                     # Validate assoc_var
+                    assoc_var_str = _to_str(assoc_var)
                     if not assoc_var_str:
                         print(
                             f"[WARN]       ✗ Empty associated_variable. Skipping row.")
@@ -768,14 +1065,6 @@ def process_llm_annotations_with_regex(
                                 if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
                                     continue
                                 # keep provided record_id
-                                if "record_id" in sr and _to_str(sr["record_id"]):
-                                    try:
-                                        max_record_id = max(max_record_id, int(sr["record_id"]))
-                                    except (TypeError, ValueError):
-                                        pass
-                                else:
-                                    max_record_id += 1
-                                    sr["record_id"] = max_record_id
                                 sr.setdefault("types", "string")
                                 new_rows.append(sr)
                         continue
@@ -828,15 +1117,103 @@ def process_llm_annotations_with_regex(
                                 continue
                             # Respect provided record_id (base_record_id)
                             if "record_id" in sr and _to_str(sr["record_id"]):
-                                try:
-                                    max_record_id = max(max_record_id, int(sr["record_id"]))
-                                except (TypeError, ValueError):
-                                    pass
+                                pass
                             else:
                                 max_record_id += 1
                                 sr["record_id"] = max_record_id
                             sr.setdefault("types", "string")
                             new_rows.append(sr)
+            # --- NEW: Post-default handler to link EpisodeEvent -> CancerEpisode (241) ---
+            def _handle_episode_event_link(ctx: dict) -> List[dict]:
+                """
+                For annotation 241:
+                  - After default creates EpisodeEvent.diseaseStatus/dateOfEpisode, add:
+                    EpisodeEvent.cancerEpisode = <record_id of last CancerEpisode BEFORE the event date>.
+                  - If no CancerEpisode exists before the event date, do not emit a link.
+                """
+                patient_id = ctx["patient_id"]
+                note_id = ctx["note_id"]
+                prompt_type = ctx["prompt_type"]
+                excel_data: pandas.DataFrame = ctx.get("excel_data")
+                staged_rows: List[dict] = ctx.get("staged_rows", [])
+                base_record_id = ctx.get("base_record_id")
+                # Prefer the EpisodeEvent.dateOfEpisode value recorded for this record group
+                episode_date_str = None
+                for r in reversed(staged_rows):
+                    if (
+                        r.get("record_id") == base_record_id
+                        and r.get("patient_id") == patient_id
+                        and r.get("core_variable") == "EpisodeEvent.dateOfEpisode"
+                        and _to_str(r.get("value"))
+                    ):
+                        episode_date_str = _to_str(r.get("value"))
+                        break
+                # Fallback to ctx["date"] (date_ref) if no explicit dateOfEpisode row found
+                if not episode_date_str:
+                    episode_date_str = _to_str(ctx.get("date"))
+                episode_dt = _parse_date_any(episode_date_str)
+
+                if not base_record_id or not episode_dt:
+                    # Without a base record_id or a valid event date, we cannot link properly
+                    return []
+
+                # Gather candidate CancerEpisode.cancerStartDate rows for this patient
+                candidates: List[tuple[datetime, int]] = []
+
+                # From existing excel_data
+                if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty and "core_variable" in excel_data.columns:
+                    for _, r in excel_data.iterrows():
+                        if _to_str(r.get("patient_id")) != _to_str(patient_id):
+                            continue
+                        if r.get("core_variable") != "CancerEpisode.cancerStartDate":
+                            continue
+                        rid = r.get("record_id")
+                        # Use value (start date) primarily; fall back to date_ref if needed
+                        start_date_str = _to_str(r.get("value")) or _to_str(r.get("date_ref"))
+                        sd = _parse_date_any(start_date_str)
+                        if sd and rid is not None:
+                            try:
+                                candidates.append((sd, int(rid)))
+                            except Exception:
+                                pass
+
+                # From staged rows in the current run
+                for r in staged_rows:
+                    if (
+                        _to_str(r.get("patient_id")) == _to_str(patient_id)
+                        and r.get("core_variable") == "CancerEpisode.cancerStartDate"
+                        and _to_str(r.get("record_id"))
+                    ):
+                        start_date_str = _to_str(r.get("value")) or _to_str(r.get("date_ref"))
+                        sd = _parse_date_any(start_date_str)
+                        if sd:
+                            try:
+                                candidates.append((sd, int(r.get("record_id"))))
+                            except Exception:
+                                pass
+
+                if not candidates:
+                    return []
+
+                # Pick the latest CancerEpisode that is <= EpisodeEvent date
+                candidates_before = [(d, rid) for d, rid in candidates if d <= episode_dt]
+                if candidates_before:
+                    linked_d, linked_episode_id = max(candidates_before, key=lambda x: x[0])
+                else:
+                    # If none before, do not link (strict requirement)
+                    return []
+
+                return [{
+                    "patient_id": patient_id,
+                    "original_source": "NLP_LLM",
+                    "core_variable": "EpisodeEvent.cancerEpisode",
+                    "date_ref": episode_date_str,  # keep event date
+                    "value": linked_episode_id    # reference to CancerEpisode record_id
+                }]
+
+            # Register post-default handler for 241 (register at module import time)
+            # register_special_handler_after("241", _handle_episode_event_link)
+
     print("\n[DEBUG] ========================================")
     print("[DEBUG] Processing Summary:")
     print(f"[DEBUG]   Total annotations processed: {len(llm_annotations)}")

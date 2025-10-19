@@ -363,7 +363,7 @@
             "chemotherapy": "4273629"
           },
           {
-            "radiation": ""
+            "radiation": "4170755"
           },
           {
             "surgery": "4121697"
@@ -771,7 +771,7 @@
             "multifocal": "36769933"
           }
         ],
-        "associated_variable": "DiseaseExtent.locoRegional"
+        "associated_variable": ""
       }
     ]
   },
