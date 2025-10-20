@@ -791,13 +791,13 @@
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "superficial": ""
+            "superficial": "36768911"
           },
           {
-            "deep": ""
+            "deep": "36768749"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Diagnosis.deepDepth"
       }
     ]
   },
@@ -1103,7 +1103,7 @@
             "therapeutic (without surgery)": "4133895"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "SystemicTreatment.chemotherapyInfo"
       },
       {
         "parameter_name": "select response type",
@@ -1158,10 +1158,10 @@
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "conventional": ""
+            "conventional": "607996"
           },
           {
-            "particle based": ""
+            "particle based": "4024005"
           }
         ],
         "associated_variable": "Radiotherapy.beamQuality"
@@ -1187,13 +1187,13 @@
         "parameter_type": "ENUM",
         "possible_values": [
           {
-            "at the hosptial": ""
+            "at the hosptial": "at the hospital"
           },
           {
-            "outside of the hospital": ""
+            "outside of the hospital": "another hospital"
           }
         ],
-        "associated_variable": ""
+        "associated_variable": "Radiotherapy.radiotherapyHospital"
       },
       {
         "parameter_name": "put date",
@@ -1471,8 +1471,8 @@
     "parameters": []
   },
   "228": {
-    "sentence_id": 228,
-    "sentence_name": "Alive, No Evidence of Disease (NED)",
+      "sentence_id": 228,
+      "sentence_name": "Alive, No Evidence of Disease (NED)",
     "sentence_content": "Status of the patient at last follow-up: Alive, No Evidence of Disease (NED)",
     "parameters": []
   },

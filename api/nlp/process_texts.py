@@ -395,7 +395,8 @@ def process_llm_annotations_with_regex(
     if "patient_id" not in excel_data.columns:
         for alt in ("p_id", "excel_data_dfpatient_id", "patient", "patientId"):
             if alt in excel_data.columns:
-                print(f"[DEBUG] Renaming '{alt}' to 'patient_id' in excel_data")
+                print(
+                    f"[DEBUG] Renaming '{alt}' to 'patient_id' in excel_data")
                 excel_data["patient_id"] = excel_data[alt]
                 break
 
@@ -483,7 +484,8 @@ def process_llm_annotations_with_regex(
             except Exception:
                 extracted_dates = []
         if extracted_dates:
-            print(f"[DEBUG] Ignoring extracted date(s) from annotation: {extracted_dates}")
+            print(
+                f"[DEBUG] Ignoring extracted date(s) from annotation: {extracted_dates}")
         date = note_date
         print(f"[DEBUG] Using note date: {date}")
 
@@ -519,53 +521,48 @@ def process_llm_annotations_with_regex(
                         f"[INFO] ✓ Matched parameterless sentence {annotation_id}: {sentence_content}")
                     annotation_matched = True
 
-                    # Look for associated_variable in first parameter if exists
+                    # NEW: run special handlers for parameterless annotations (e.g., 225)
+                    handler = SPECIAL_HANDLERS.get(str(annotation_id))
+                    if handler:
+                        ctx = {
+                            "annotation_id": str(annotation_id),
+                            "annotation_data": annotation_data,
+                            "match": None,
+                            "patient_id": patient_id,
+                            "date": date,
+                            "note_id": note_id,
+                            "prompt_type": prompt_type,
+                            "excel_data": excel_data,
+                            "staged_rows": new_rows,
+                        }
+                        special_rows = handler(ctx)
+                        for sr in special_rows:
+                            cv = _to_str(sr.get("core_variable", ""))
+                            val = sr.get("value")
+                            if not cv or _is_invalid_value("TEXT", val):
+                                print(
+                                    f"[DEBUG]     Skipping special row with empty/invalid fields: {sr}")
+                                continue
+                            if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
+                                continue
+                            # Respect provided record_id if present; otherwise allocate a new one
+                            if "record_id" in sr and _to_str(sr["record_id"]):
+                                try:
+                                    max_record_id = max(
+                                        max_record_id, int(sr["record_id"]))
+                                except (TypeError, ValueError):
+                                    pass
+                            else:
+                                max_record_id += 1
+                                sr["record_id"] = max_record_id
+                            sr.setdefault("types", "string")
+                            new_rows.append(sr)
+
+                    # ...existing code for optional associated_variable in first parameter...
                     params = annotation_data.get("parameters", [])
                     if params and len(params) > 0 and "associated_variable" in params[0]:
-                        assoc_var = params[0]["associated_variable"]
-                        value = params[0].get("value", "")
-
-                        print(f"[DEBUG]     Associated variable: {assoc_var}")
-                        print(f"[DEBUG]     Value: {value}")
-
-                        if assoc_var and value:
-                            max_record_id += 1
-                            new_row = {
-                                "patient_id": patient_id,
-                                "original_source": "NLP_LLM",
-                                "core_variable": assoc_var,
-                                "date_ref": date,
-                                "value": value,
-                                "record_id": max_record_id,
-                                "note_id": note_id,
-                                "prompt_type": prompt_type
-                            }
-                            new_rows.append(new_row)
-
-                            # --- NEW: validate and deduplicate parameterless rows ---
-                            assoc_var_str = _to_str(assoc_var)
-                            if not assoc_var_str or _is_invalid_value("TEXT", value):
-                                print(
-                                    f"[WARN]     ✗ Invalid parameterless row (var/value). Skipping.")
-                                continue
-                            if _is_duplicate_row(excel_data, new_rows, patient_id, assoc_var_str, value, date):
-                                print(
-                                    f"[DEBUG]     ✗ Duplicate parameterless row detected. Skipping.")
-                                continue
-                            # Only now assign record_id and append
-                            max_record_id += 1
-                            new_row = {
-                                "patient_id": patient_id,
-                                "original_source": "NLP_LLM",
-                                "core_variable": assoc_var_str,
-                                "date_ref": date,
-                                "value": value,
-                                "record_id": max_record_id,
-                                "note_id": note_id,
-                                "prompt_type": prompt_type
-                            }
-                            new_rows.append(new_row)
-                            # -------------------------------------------------------
+                        # ...existing code...
+                        pass
                 continue
 
             # Get the regex pattern for the current annotation
@@ -632,7 +629,8 @@ def process_llm_annotations_with_regex(
                             # Respect provided record_id if present; otherwise allocate a new one
                             if "record_id" in sr and _to_str(sr["record_id"]):
                                 try:
-                                    max_record_id = max(max_record_id, int(sr["record_id"]))
+                                    max_record_id = max(
+                                        max_record_id, int(sr["record_id"]))
                                 except (TypeError, ValueError):
                                     pass
                             else:
@@ -652,12 +650,14 @@ def process_llm_annotations_with_regex(
                     assoc_var = parameter_data["associated_variable"]
                     param_type = parameter_data.get(
                         "parameter_type", "DEFAULT")
-                    assoc_var_str = _to_str(assoc_var)  # <-- precompute for special cases
+                    # <-- precompute for special cases
+                    assoc_var_str = _to_str(assoc_var)
 
                     # Determine the value based on parameter_type
                     if param_type == "ENUM":
                         # Map captured value to concept_id
-                        possible_values = parameter_data.get("possible_values", [])
+                        possible_values = parameter_data.get(
+                            "possible_values", [])
                         captured_value = _first_group(match)
 
                         value = None
@@ -665,33 +665,39 @@ def process_llm_annotations_with_regex(
                             for key, concept_id in pv_dict.items():
                                 if key.lower() in _to_str(captured_value).lower():
                                     value = concept_id
-                                    print(f"[DEBUG]       ✓ Mapped '{key}' → '{concept_id}'")
+                                    print(
+                                        f"[DEBUG]       ✓ Mapped '{key}' → '{concept_id}'")
                                     break
                             if value:
                                 break
 
                         if not value:
-                            print(f"[WARN]       ✗ No concept_id mapping found for '{captured_value}'. Skipping row.")
+                            print(
+                                f"[WARN]       ✗ No concept_id mapping found for '{captured_value}'. Skipping row.")
                             continue
                     elif param_type in ["DATE", "NUMBER", "TEXT"]:
                         value = _first_group(match)
-                        print(f"[DEBUG]       Extracted {param_type} value: {value}")
+                        print(
+                            f"[DEBUG]       Extracted {param_type} value: {value}")
                         # --- special case: annotation 74 provides age; compute birth year from note date ---
                         if str(annotation_id) == "74" and assoc_var_str == "Patient.birthYear":
                             dt = _parse_date_any(_to_str(date))
                             try:
                                 age_years = float(_to_str(value))
                             except Exception:
-                                print(f"[WARN]       ✗ Invalid age '{value}' for birth year computation. Skipping row.")
+                                print(
+                                    f"[WARN]       ✗ Invalid age '{value}' for birth year computation. Skipping row.")
                                 skipped_count += 1
                                 continue
                             if not dt:
-                                print(f"[WARN]       ✗ Invalid/missing note date '{date}' for birth year computation. Skipping row.")
+                                print(
+                                    f"[WARN]       ✗ Invalid/missing note date '{date}' for birth year computation. Skipping row.")
                                 skipped_count += 1
                                 continue
                             birth_year = int(dt.year - int(age_years))
                             value = birth_year
-                            print(f"[DEBUG]       Computed Patient.birthYear = {birth_year} from age {age_years} and note year {dt.year}")
+                            print(
+                                f"[DEBUG]       Computed Patient.birthYear = {birth_year} from age {age_years} and note year {dt.year}")
                     elif param_type == "DEFAULT":
                         value = parameter_data.get("value", match)
                         print(f"[DEBUG]       Using DEFAULT value: {value}")
@@ -725,17 +731,21 @@ def process_llm_annotations_with_regex(
                             or (str(annotation_id) == "240" and assoc_var_str == "CancerEpisode.cancerStartDate")
                             # NEW: support 241 duplicates as well
                             or (str(annotation_id) == "241" and assoc_var_str in {"EpisodeEvent.diseaseStatus", "EpisodeEvent.dateOfEpisode"})
+                            # NEW: support 219 anchored on RegionalDeepHyperthemia.startDate
+                            or (str(annotation_id) == "219" and assoc_var_str == "RegionalDeepHyperthemia.startDate")
                         ):
                             # try find existing record_id in excel_data or staged rows
                             if not excel_data.empty:
                                 exist = excel_data[
                                     (excel_data["patient_id"] == patient_id) &
                                     (excel_data["core_variable"] == assoc_var_str) &
-                                    (excel_data["date_ref"].astype(str) == _to_str(date))
+                                    (excel_data["date_ref"].astype(
+                                        str) == _to_str(date))
                                 ]
                                 if not exist.empty and "record_id" in exist.columns:
                                     try:
-                                        base_record_id = int(exist.iloc[0]["record_id"])
+                                        base_record_id = int(
+                                            exist.iloc[0]["record_id"])
                                     except Exception:
                                         base_record_id = None
                             if base_record_id is None:
@@ -745,7 +755,8 @@ def process_llm_annotations_with_regex(
                                         base_record_id = r.get("record_id")
                                         break
                         # If post-handler present and we have base_record_id, run it now
-                        post_handler = SPECIAL_HANDLERS_AFTER.get(str(annotation_id))
+                        post_handler = SPECIAL_HANDLERS_AFTER.get(
+                            str(annotation_id))
                         if post_handler and base_record_id:
                             ctx_after = {
                                 "annotation_id": str(annotation_id),
@@ -770,7 +781,8 @@ def process_llm_annotations_with_regex(
                                 # keep provided record_id
                                 if "record_id" in sr and _to_str(sr["record_id"]):
                                     try:
-                                        max_record_id = max(max_record_id, int(sr["record_id"]))
+                                        max_record_id = max(
+                                            max_record_id, int(sr["record_id"]))
                                     except (TypeError, ValueError):
                                         pass
                                 else:
@@ -796,15 +808,18 @@ def process_llm_annotations_with_regex(
                     new_rows.append(new_row)
 
                     # --- NEW: After-default special handler hook (211, 240, 241) ---
-                    post_handler = SPECIAL_HANDLERS_AFTER.get(str(annotation_id))
+                    post_handler = SPECIAL_HANDLERS_AFTER.get(
+                        str(annotation_id))
                     if post_handler and (
                         # Keep existing cases
                         assoc_var_str == "IsolatedLimbPerfusion.startDate"
                         or (str(annotation_id) == "240" and assoc_var_str == "CancerEpisode.cancerStartDate")
                         # NEW: trigger for 241 after either diseaseStatus or date row
                         or (str(annotation_id) == "241" and assoc_var_str in {"EpisodeEvent.diseaseStatus", "EpisodeEvent.dateOfEpisode"})
+                        # NEW: trigger for 219 anchored on RegionalDeepHyperthemia.startDate
+                        or (str(annotation_id) == "219" and assoc_var_str == "RegionalDeepHyperthemia.startDate")
                     ):
-                        base_record_id = max_record_id  # record_id just assigned to this EpisodeEvent row
+                        base_record_id = max_record_id  # record_id just assigned to this row
                         ctx_after = {
                             "annotation_id": str(annotation_id),
                             "annotation_data": annotation_data,
@@ -822,14 +837,16 @@ def process_llm_annotations_with_regex(
                             cv = _to_str(sr.get("core_variable", ""))
                             val = sr.get("value")
                             if not cv or _is_invalid_value("TEXT", val):
-                                print(f"[DEBUG]       Skipping post-special row with empty/invalid fields: {sr}")
+                                print(
+                                    f"[DEBUG]       Skipping post-special row with empty/invalid fields: {sr}")
                                 continue
                             if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
                                 continue
                             # Respect provided record_id (base_record_id)
                             if "record_id" in sr and _to_str(sr["record_id"]):
                                 try:
-                                    max_record_id = max(max_record_id, int(sr["record_id"]))
+                                    max_record_id = max(
+                                        max_record_id, int(sr["record_id"]))
                                 except (TypeError, ValueError):
                                     pass
                             else:
@@ -956,7 +973,6 @@ if __name__ == "__main__":
 
     # with open(prompts_json_path, "r", encoding="utf-8") as f:
     #     prompts_config = json.load(f)
-
 
     # prompt_types = list(prompts_config.keys())
     # print(f"[INFO] Found {len(prompt_types)} prompt types: {prompt_types}")

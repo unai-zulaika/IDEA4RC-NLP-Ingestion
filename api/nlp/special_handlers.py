@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Sequence
 from typing import Any, Callable, Dict, List
-
+import re
 import pandas
-
 from .processing_utils import parse_date_any, to_str
 
 Handler = Callable[[Dict[str, Any]], List[Dict[str, Any]]]
@@ -59,7 +56,8 @@ def handle_radiotherapy_site(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         return []
 
     tokens = [t.strip().lower() for t in details.split(",") if t and t.strip()]
-    normalized = {token.replace("-", " ").replace("_", " ").strip() for token in tokens}
+    normalized = {token.replace("-", " ").replace("_", " ").strip()
+                  for token in tokens}
 
     site_var_map = {
         "lung": "Radiotherapy.metastaticTreatmentSiteLung",
@@ -148,18 +146,21 @@ def _find_recent_episode_event_id(
             return
 
     if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
-        subset = excel_data[excel_data.get("core_variable") == "EpisodeEvent.dateOfEpisode"]
+        subset = excel_data[excel_data.get(
+            "core_variable") == "EpisodeEvent.dateOfEpisode"]
         for _, row in subset.iterrows():
             if to_str(row.get("patient_id")) != to_str(patient_id):
                 continue
-            add_candidate(row.get("value") or row.get("date_ref"), row.get("record_id"))
+            add_candidate(row.get("value") or row.get(
+                "date_ref"), row.get("record_id"))
 
     for row in staged_rows:
         if to_str(row.get("patient_id")) != to_str(patient_id):
             continue
         if row.get("core_variable") != "EpisodeEvent.dateOfEpisode":
             continue
-        add_candidate(row.get("value") or row.get("date_ref"), row.get("record_id"))
+        add_candidate(row.get("value") or row.get(
+            "date_ref"), row.get("record_id"))
 
     if not candidates:
         return None
@@ -186,7 +187,8 @@ def handle_disease_extent_progression(ctx: Dict[str, Any]) -> List[Dict[str, Any
         return []
 
     annotation_dt = parse_date_any(to_str(date_ref))
-    episode_event_id = _find_recent_episode_event_id(patient_id, annotation_dt, excel_data, staged_rows)
+    episode_event_id = _find_recent_episode_event_id(
+        patient_id, annotation_dt, excel_data, staged_rows)
 
     if not episode_event_id:
         return []
@@ -265,7 +267,8 @@ def handle_disease_extent_progression(ctx: Dict[str, Any]) -> List[Dict[str, Any
         )
 
     if is_metastatic:
-        target_sites = unique_sites if unique_sites else (["other"] if site_text else [])
+        target_sites = unique_sites if unique_sites else (
+            ["other"] if site_text else [])
         for site in target_sites:
             mapping = site_value_map.get(site)
             if not mapping:
@@ -393,7 +396,8 @@ def handle_episode_event_link(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
                 continue
             if row.get("core_variable") != "CancerEpisode.cancerStartDate":
                 continue
-            candidate_date = to_str(row.get("value")) or to_str(row.get("date_ref"))
+            candidate_date = to_str(
+                row.get("value")) or to_str(row.get("date_ref"))
             add_candidate(candidate_date, row.get("record_id"))
 
     for row in staged_rows:
@@ -401,7 +405,8 @@ def handle_episode_event_link(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         if row.get("core_variable") != "CancerEpisode.cancerStartDate":
             continue
-        candidate_date = to_str(row.get("value")) or to_str(row.get("date_ref"))
+        candidate_date = to_str(
+            row.get("value")) or to_str(row.get("date_ref"))
         add_candidate(candidate_date, row.get("record_id"))
 
     if not candidates:
@@ -475,7 +480,7 @@ def handle_genetic_syndromes(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
         "olliers disease": ("Patient.olliersDisease", "4145177"),
         "maffucci syndrome": ("Patient.maffuciSyndrome", "4187683"),
         "li fraumeni syndrome": ("Patient.liFraumeniSyndrome", "4323645"),
-        "mccune albright syndrome": ("Patient.mccuneAlbrightSyndrome", "37117262"),
+        "mccune albright syndrome": ("Patient.mccuneAlBrightSyndrome", "37117262"),
         "multiple osteochondromas": ("Patient.multipleOsteochondromas", "37396802"),
         "neurofibromatosis type 1": ("Patient.neurofibromatosisType1", "377252"),
         "rothmund thomson syndrome": ("Patient.rothmundThomsonSyndrome", "4286355"),
@@ -614,18 +619,21 @@ def _find_latest_episode_event_id(
             return
 
     if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
-        subset = excel_data[excel_data.get("core_variable") == "EpisodeEvent.dateOfEpisode"]
+        subset = excel_data[excel_data.get(
+            "core_variable") == "EpisodeEvent.dateOfEpisode"]
         for _, row in subset.iterrows():
             if to_str(row.get("patient_id")) != to_str(patient_id):
                 continue
-            add_candidate(row.get("value") or row.get("date_ref"), row.get("record_id"))
+            add_candidate(row.get("value") or row.get(
+                "date_ref"), row.get("record_id"))
 
     for row in staged_rows:
         if to_str(row.get("patient_id")) != to_str(patient_id):
             continue
         if row.get("core_variable") != "EpisodeEvent.dateOfEpisode":
             continue
-        add_candidate(row.get("value") or row.get("date_ref"), row.get("record_id"))
+        add_candidate(row.get("value") or row.get(
+            "date_ref"), row.get("record_id"))
 
     if not candidates:
         return None
@@ -648,14 +656,16 @@ def handle_localized_stage(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
     staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
 
     annotation_dt = parse_date_any(to_str(date_ref))
-    group_record_id = _find_nearby_disease_extent_group(patient_id, annotation_dt, excel_data, staged_rows)
+    group_record_id = _find_nearby_disease_extent_group(
+        patient_id, annotation_dt, excel_data, staged_rows)
 
     rows: List[Dict[str, Any]] = []
 
     if group_record_id is None:
         group_record_id = _next_record_id(excel_data, staged_rows)
         # Try link to the latest EpisodeEvent
-        episode_event_id = _find_latest_episode_event_id(patient_id, annotation_dt, excel_data, staged_rows)
+        episode_event_id = _find_latest_episode_event_id(
+            patient_id, annotation_dt, excel_data, staged_rows)
         if episode_event_id:
             rows.append(
                 {
@@ -701,7 +711,8 @@ def handle_loco_regional(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     selection = _match_value(match, 0).lower()
     annotation_dt = parse_date_any(to_str(date_ref))
-    group_record_id = _find_nearby_disease_extent_group(patient_id, annotation_dt, excel_data, staged_rows)
+    group_record_id = _find_nearby_disease_extent_group(
+        patient_id, annotation_dt, excel_data, staged_rows)
     if group_record_id is None:
         group_record_id = _next_record_id(excel_data, staged_rows)
 
@@ -751,6 +762,612 @@ def handle_loco_regional(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
+def handle_regional_deep_hyperthermia_link(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 219: If 'select combination' is 'in combination with radiotherapy',
+    create a Radiotherapy.regionalDeepHyperthemia row whose value is the record_id
+    of the RegionalDeepHyperthemia group (anchored on RegionalDeepHyperthemia.startDate).
+    """
+    match = ctx.get("match")
+    patient_id = ctx["patient_id"]
+    note_id = ctx.get("note_id")
+    prompt_type = ctx.get("prompt_type")
+    date_ref = ctx.get("date")
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+    base_record_id = ctx.get("base_record_id")
+
+    # Extract 'select combination' (first group)
+    selection = _match_value(match, 0).lower()
+    if "radiotherapy" not in selection:
+        return []
+
+    # Fallback: try to resolve base_record_id if missing by locating a RegionalDeepHyperthemia.startDate row
+    if not base_record_id:
+        # Prefer a staged row for current patient
+        for row in reversed(staged_rows):
+            if (
+                to_str(row.get("patient_id")) == to_str(patient_id)
+                and row.get("core_variable") == "RegionalDeepHyperthemia.startDate"
+                and to_str(row.get("record_id"))
+            ):
+                try:
+                    base_record_id = int(row.get("record_id"))
+                    break
+                except (TypeError, ValueError):
+                    continue
+
+        # Look into excel_data if still not found
+        if not base_record_id and isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+            subset = excel_data[
+                (excel_data.get("patient_id") == patient_id)
+                & (excel_data.get("core_variable") == "RegionalDeepHyperthemia.startDate")
+            ]
+            if not subset.empty:
+                try:
+                    base_record_id = int(subset.iloc[-1]["record_id"])
+                except (TypeError, ValueError, KeyError):
+                    base_record_id = None
+
+    if not base_record_id:
+        return []
+
+    return [
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "Radiotherapy.regionalDeepHyperthemia",
+            "date_ref": date_ref,
+            "value": base_record_id,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "reference",
+            "record_id": base_record_id,
+        }
+    ]
+
+
+def handle_patient_followup_dod(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 225 (parameterless): Dead of Disease (DOD)
+    - If a PatientFollowUp group exists within ±14 days of note date, reuse its record_id.
+    - Else create a new group (record_id) and add PatientFollowUp.patient reference.
+    - Always add PatientFollowUp.statusAtLastFollowUp = 2000100072 in the chosen group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx.get("date")
+    note_id = ctx.get("note_id")
+    prompt_type = ctx.get("prompt_type")
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_pfu(cv: Any) -> bool:
+        return to_str(cv).startswith("PatientFollowUp.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series):
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_pfu(row.get("core_variable")):
+            return
+        # prefer date_ref; fallback to value for known date fields
+        date_str = to_str(row.get("date_ref"))
+        if not date_str and row.get("core_variable") in {"PatientFollowUp.patientFollowUpDate", "PatientFollowUp.lastContact"}:
+            date_str = to_str(row.get("value"))
+        dt = parse_date_any(date_str)
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        # pick nearest by days; if tie, smaller record_id
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    if group_record_id is None:
+        # allocate a new group id
+        group_record_id = _next_record_id(excel_data, staged_rows)  # noqa: F821 (defined elsewhere in file)
+        create_patient_row = True
+    else:
+        create_patient_row = False
+
+    rows: List[Dict[str, Any]] = []
+
+    if create_patient_row:
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "PatientFollowUp.patient",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Always add the DOD status row
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "PatientFollowUp.statusAtLastFollowUp",
+            "date_ref": date_ref,
+            "value": "2000100072",
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "concept",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
+def handle_patient_followup_doc(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 226 (parameterless): Dead of Other Cause (DOC)
+    - If a PatientFollowUp group exists within ±14 days of note date, reuse its record_id.
+    - Else create a new group (record_id) and add PatientFollowUp.patient reference.
+    - Always add PatientFollowUp.statusAtLastFollowUp = 2000100073 in the chosen group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_pfu(cv: Any) -> bool:
+        return to_str(cv).startswith("PatientFollowUp.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series):
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_pfu(row.get("core_variable")):
+            return
+        date_str = to_str(row.get("date_ref"))
+        if not date_str and row.get("core_variable") in {"PatientFollowUp.patientFollowUpDate", "PatientFollowUp.lastContact"}:
+            date_str = to_str(row.get("value"))
+        dt = parse_date_any(date_str)
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    if group_record_id is None:
+        # allocate a new group id
+        # _next_record_id is defined elsewhere in this module
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        # create PatientFollowUp.patient reference in the new group
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "PatientFollowUp.patient",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Always add the DOC status row
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "PatientFollowUp.statusAtLastFollowUp",
+            "date_ref": date_ref,
+            "value": "2000100073",
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "concept",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
+def handle_patient_followup_duc(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 227 (parameterless): Dead of Unknown Cause (DUC)
+    - If a PatientFollowUp group exists within ±14 days of note date, reuse its record_id.
+    - Else create a new group (record_id) and add PatientFollowUp.patient reference.
+    - Always add PatientFollowUp.statusAtLastFollowUp = 2000100074 in the chosen group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_pfu(cv: Any) -> bool:
+        return to_str(cv).startswith("PatientFollowUp.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series):
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_pfu(row.get("core_variable")):
+            return
+        date_str = to_str(row.get("date_ref"))
+        if not date_str and row.get("core_variable") in {"PatientFollowUp.patientFollowUpDate", "PatientFollowUp.lastContact"}:
+            date_str = to_str(row.get("value"))
+        dt = parse_date_any(date_str)
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    if group_record_id is None:
+        # allocate a new group id
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        # create PatientFollowUp.patient reference in the new group
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "PatientFollowUp.patient",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Always add the DUC status row
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "PatientFollowUp.statusAtLastFollowUp",
+            "date_ref": date_ref,
+            "value": "2000100074",
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "concept",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
+def handle_patient_followup_ned(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 228 (parameterless): Alive, No Evidence of Disease (NED)
+    - If a PatientFollowUp group exists within ±14 days of note date, reuse its record_id.
+    - Else create a new group (record_id) and add PatientFollowUp.patient reference.
+    - Always add PatientFollowUp.statusAtLastFollowUp = 2000100071 in the chosen group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_pfu(cv: Any) -> bool:
+        return to_str(cv).startswith("PatientFollowUp.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series):
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_pfu(row.get("core_variable")):
+            return
+        # prefer date_ref; fallback to value for known date fields
+        date_str = to_str(row.get("date_ref"))
+        if not date_str and row.get("core_variable") in {"PatientFollowUp.patientFollowUpDate", "PatientFollowUp.lastContact"}:
+            date_str = to_str(row.get("value"))
+        dt = parse_date_any(date_str)
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    if group_record_id is None:
+        # allocate a new group id
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        # create PatientFollowUp.patient reference in the new group
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "PatientFollowUp.patient",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Always add the NED status row
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "PatientFollowUp.statusAtLastFollowUp",
+            "date_ref": date_ref,
+            "value": "2000100071",
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "concept",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
+def handle_patient_followup_awd_local(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 229 (parameterless): Alive With Disease (AWD) - local
+    - Reuse an existing PatientFollowUp group within ±14 days of the note date.
+    - Otherwise create a new group (record_id) and add PatientFollowUp.patient reference.
+    - Always add PatientFollowUp.statusAtLastFollowUp = 2000100075 in that group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx.get("date")
+    note_id = ctx.get("note_id")
+    prompt_type = ctx.get("prompt_type")
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_pfu(cv: Any) -> bool:
+        return to_str(cv).startswith("PatientFollowUp.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series):
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_pfu(row.get("core_variable")):
+            return
+        date_str = to_str(row.get("date_ref"))
+        if not date_str and row.get("core_variable") in {"PatientFollowUp.patientFollowUpDate", "PatientFollowUp.lastContact"}:
+            date_str = to_str(row.get("value"))
+        dt = parse_date_any(date_str)
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    if group_record_id is None:
+        # _next_record_id is available in this module
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        # create PatientFollowUp.patient reference in the new group
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "PatientFollowUp.patient",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Always add the AWD-local status row
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "PatientFollowUp.statusAtLastFollowUp",
+            "date_ref": date_ref,
+            "value": "2000100075",
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "concept",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
+def handle_patient_followup_awd_nodes(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 230 (parameterless): Alive With Disease (AWD) - lymph nodes
+    - Reuse an existing PatientFollowUp group within ±14 days of the note date.
+    - Otherwise create a new group (record_id) and add PatientFollowUp.patient reference.
+    - Always add PatientFollowUp.statusAtLastFollowUp = 2000100075 in that group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx.get("date")
+    note_id = ctx.get("note_id")
+    prompt_type = ctx.get("prompt_type")
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_pfu(cv: Any) -> bool:
+        return to_str(cv).startswith("PatientFollowUp.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series):
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_pfu(row.get("core_variable")):
+            return
+        date_str = to_str(row.get("date_ref"))
+        if not date_str and row.get("core_variable") in {"PatientFollowUp.patientFollowUpDate", "PatientFollowUp.lastContact"}:
+            date_str = to_str(row.get("value"))
+        dt = parse_date_any(date_str)
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    if group_record_id is None:
+        # allocate a new group id and create PatientFollowUp.patient
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "PatientFollowUp.patient",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Always add the AWD status row (concept 2000100075)
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "PatientFollowUp.statusAtLastFollowUp",
+            "date_ref": date_ref,
+            "value": "2000100075",
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "concept",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
 SPECIAL_HANDLERS: Dict[str, Handler] = {
     "61": handle_weight_height_bmi,
     "63": handle_genetic_syndromes,
@@ -761,9 +1378,16 @@ SPECIAL_HANDLERS: Dict[str, Handler] = {
     "217": handle_radiotherapy_site,
     "261": handle_radiotherapy_site,
     "242": handle_disease_extent_progression,
+    "225": handle_patient_followup_dod,
+    "227": handle_patient_followup_duc,
+    "230": handle_patient_followup_awd_nodes,
 }
 
 SPECIAL_HANDLERS_AFTER: Dict[str, Handler] = {
     "211": handle_ilp_drugs,
     "241": handle_episode_event_link,
+    "219": handle_regional_deep_hyperthermia_link,
+    "226": handle_patient_followup_doc,
+    "228": handle_patient_followup_ned,
+    "229": handle_patient_followup_awd_local,
 }
