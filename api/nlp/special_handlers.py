@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Sequence
 import re
 import pandas
 from .processing_utils import parse_date_any, to_str
@@ -1200,7 +1200,7 @@ def handle_patient_followup_awd_local(ctx: Dict[str, Any]) -> List[Dict[str, Any
     """
     patient_id = ctx["patient_id"]
     date_ref = ctx.get("date")
-    note_id = ctx.get("note_id")
+    note_id = ctx["note_id"]
     prompt_type = ctx.get("prompt_type")
     excel_data: pandas.DataFrame | None = ctx.get("excel_data")
     staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
@@ -1288,9 +1288,9 @@ def handle_patient_followup_awd_nodes(ctx: Dict[str, Any]) -> List[Dict[str, Any
     - Always add PatientFollowUp.statusAtLastFollowUp = 2000100075 in that group.
     """
     patient_id = ctx["patient_id"]
-    date_ref = ctx.get("date")
-    note_id = ctx.get("note_id")
-    prompt_type = ctx.get("prompt_type")
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
     excel_data: pandas.DataFrame | None = ctx.get("excel_data")
     staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
 
@@ -1368,6 +1368,396 @@ def handle_patient_followup_awd_nodes(ctx: Dict[str, Any]) -> List[Dict[str, Any
     return rows
 
 
+def handle_patient_followup_awd_metastatic(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 231: Alive With Disease (AWD) - metastatic
+    - If a PatientFollowUp group exists within ±14 days of the note date, reuse its record_id.
+    - Else create a new group (record_id) and add PatientFollowUp.patient reference.
+    - Always add PatientFollowUp.statusAtLastFollowUp = 2000100075 in the chosen group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_pfu(cv: Any) -> bool:
+        return to_str(cv).startswith("PatientFollowUp.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series):
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_pfu(row.get("core_variable")):
+            return
+        # prefer date_ref; fallback to value for known date fields
+        date_str = to_str(row.get("date_ref"))
+        if not date_str and row.get("core_variable") in {"PatientFollowUp.patientFollowUpDate", "PatientFollowUp.lastContact"}:
+            date_str = to_str(row.get("value"))
+        dt = parse_date_any(date_str)
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    if group_record_id is None:
+        # allocate a new group id
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        # create PatientFollowUp.patient reference in the new group
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "PatientFollowUp.patient",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Always add the AWD (metastatic) status row (concept 2000100075)
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "PatientFollowUp.statusAtLastFollowUp",
+            "date_ref": date_ref,
+            "value": "2000100075",
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "concept",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
+def handle_clinical_stage_regional_nodes(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 93 (parameterless): Regional node metastases
+    - Reuse an existing ClinicalStage group within ±14 days of the note date.
+    - Otherwise create a new group (record_id) and add ClinicalStage.diagnosisReference with the patient id.
+    - Always add ClinicalStage.regionalNodalMetastases = True in that group.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx.get("date")
+    note_id = ctx.get("note_id")
+    prompt_type = ctx.get("prompt_type")
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_cs(cv: Any) -> bool:
+        return to_str(cv).startswith("ClinicalStage.")
+
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series) -> None:
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_cs(row.get("core_variable")):
+            return
+        dt = parse_date_any(to_str(row.get("date_ref")))
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                rid = int(row.get("record_id"))
+                candidates.append((delta, rid))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    if group_record_id is None:
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "ClinicalStage.diagnosisReference",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    rows.append(
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "ClinicalStage.regionalNodalMetastases",
+            "date_ref": date_ref,
+            "value": True,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "boolean",
+            "record_id": group_record_id,
+        }
+    )
+
+    return rows
+
+
+def handle_clinical_stage_distant_metastases(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 94: Distant metastases (with organ selection)
+    - Reuse ClinicalStage group within ±14 days, else create a new one and add ClinicalStage.diagnosisReference.
+    - For each selected organ, add the corresponding ClinicalStage.* boolean = True.
+    """
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+    excel_data: pandas.DataFrame | None = ctx.get("excel_data")
+    staged_rows: List[Dict[str, Any]] = ctx.get("staged_rows", [])
+    match = ctx.get("match")
+
+    annotation_dt = parse_date_any(to_str(date_ref))
+
+    def is_cs(cv: Any) -> bool:
+        return to_str(cv).startswith("ClinicalStage.")
+
+    # Find existing ClinicalStage group within ±14 days
+    candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
+
+    def consider_row(row: Dict[str, Any] | pandas.Series) -> None:
+        if to_str(row.get("patient_id")) != to_str(patient_id):
+            return
+        if not is_cs(row.get("core_variable")):
+            return
+        dt = parse_date_any(to_str(row.get("date_ref")))
+        if not dt or not annotation_dt:
+            return
+        delta = abs((annotation_dt - dt).days)
+        if delta <= 14:
+            try:
+                candidates.append((delta, int(row.get("record_id"))))
+            except (TypeError, ValueError):
+                return
+
+    if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+        for _, r in excel_data.iterrows():
+            consider_row(r)
+    for r in staged_rows:
+        consider_row(r)
+
+    group_record_id: int | None = None
+    if candidates:
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        group_record_id = candidates[0][1]
+
+    rows: List[Dict[str, Any]] = []
+
+    # If no nearby group, create a new one and add ClinicalStage.diagnosisReference
+    if group_record_id is None:
+        group_record_id = _next_record_id(excel_data, staged_rows)
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": "ClinicalStage.diagnosisReference",
+                "date_ref": date_ref,
+                "value": patient_id,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "reference",
+                "record_id": group_record_id,
+            }
+        )
+
+    # Map selected organs to ClinicalStage variables
+    site_var_map = {
+        "lung": "ClinicalStage.lung",
+        "liver": "ClinicalStage.liver",
+        "brain": "ClinicalStage.brain",
+        "bone": "ClinicalStage.metastasisatbone",
+        "soft tissue": "ClinicalStage.softTissue",
+        "other": "ClinicalStage.otherViscera",
+        "unknown": "ClinicalStage.unknown",
+    }
+
+    selection_raw = _match_value(match, 0)
+    tokens = []
+    if selection_raw:
+        for token in re.split(r",|;|/| and ", to_str(selection_raw)):
+            t = to_str(token).strip().lower().strip(". ")
+            if not t:
+                continue
+            t = re.sub(r"^(in|to|at|on|the)\s+", "", t)
+            if "soft tissue" in t:
+                t = "soft tissue"
+            elif t.endswith("s") and t[:-1] in {"lung", "bone", "liver", "brain"}:
+                t = t[:-1]
+            elif "other" in t and "unknown" not in t:
+                t = "other"
+            elif "unknown" in t:
+                t = "unknown"
+            tokens.append(t)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    normalized_sites: List[str] = []
+    for t in tokens:
+        if t not in seen:
+            seen.add(t)
+            normalized_sites.append(t)
+
+    # If nothing parsed, nothing to add
+    for site in normalized_sites:
+        var = site_var_map.get(site)
+        if not var:
+            continue
+        rows.append(
+            {
+                "patient_id": patient_id,
+                "original_source": "NLP_LLM",
+                "core_variable": var,
+                "date_ref": date_ref,
+                "value": True,
+                "note_id": note_id,
+                "prompt_type": prompt_type,
+                "types": "boolean",
+                "record_id": group_record_id,
+            }
+        )
+
+    return rows
+
+
+def handle_biopsy_mitotic_count_hpf(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 187: Biopsy mitotic count: [mitoses count]/[number of HPFs]HPF
+    Emit a single Diagnosis.biopsyMitoticCount row combining both parameters as '<count>/<HPF>HPF'.
+    """
+    match = ctx.get("match")
+    patient_id = ctx["patient_id"]
+    date_ref = ctx.get("date")
+    note_id = ctx.get("note_id")
+    prompt_type = ctx.get("prompt_type")
+
+    mitoses = _match_value(match, 0)
+    hpf = _match_value(match, 1)
+    if not mitoses or not hpf:
+        return []
+
+    # Normalize numbers
+    mitoses_num = re.findall(r"\d+\.?\d*", to_str(mitoses))
+    hpf_num = re.findall(r"\d+\.?\d*", to_str(hpf))
+    if not mitoses_num or not hpf_num:
+        return []
+
+    value = f"{mitoses_num[0]}/{hpf_num[0]}HPF"
+
+    return [
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "Diagnosis.biopsyMitoticCount",
+            "date_ref": date_ref,
+            "value": value,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "string",
+        }
+    ]
+
+
+def handle_biopsy_mitotic_count_mm2(ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Annotation 188: Biopsy mitotic count: [mitoses count]/[area]mm2
+    Normalize to Number per 10 HPF (equivalent to per 1 mm2).
+    Emits Diagnosis.biopsyMitoticCount as '<normalized>/10HPF'.
+    """
+    match = ctx.get("match")
+    patient_id = ctx["patient_id"]
+    date_ref = ctx["date"]
+    note_id = ctx["note_id"]
+    prompt_type = ctx["prompt_type"]
+
+    mitoses_raw = _match_value(match, 0)
+    area_raw = _match_value(match, 1)
+    if not mitoses_raw or not area_raw:
+        return []
+
+    m_nums = re.findall(r"\d+\.?\d*", to_str(mitoses_raw))
+    a_nums = re.findall(r"\d+\.?\d*", to_str(area_raw))
+    if not m_nums or not a_nums:
+        return []
+
+    try:
+        mitoses = float(m_nums[0])
+        area_mm2 = float(a_nums[0])
+        if area_mm2 <= 0:
+            return []
+        per_mm2 = mitoses / area_mm2  # per 1 mm2 == per 10 HPF
+    except Exception:
+        return []
+
+    # Format nicely: integer if whole, else up to 2 decimals without trailing zeros
+    if per_mm2.is_integer():
+        value_num = str(int(per_mm2))
+    else:
+        value_num = f"{per_mm2:.2f}".rstrip("0").rstrip(".")
+
+    value = f"{value_num}/10HPF"
+
+    return [
+        {
+            "patient_id": patient_id,
+            "original_source": "NLP_LLM",
+            "core_variable": "Diagnosis.biopsyMitoticCount",
+            "date_ref": date_ref,
+            "value": value,
+            "note_id": note_id,
+            "prompt_type": prompt_type,
+            "types": "string",
+        }
+    ]
+
+
 SPECIAL_HANDLERS: Dict[str, Handler] = {
     "61": handle_weight_height_bmi,
     "63": handle_genetic_syndromes,
@@ -1381,6 +1771,11 @@ SPECIAL_HANDLERS: Dict[str, Handler] = {
     "225": handle_patient_followup_dod,
     "227": handle_patient_followup_duc,
     "230": handle_patient_followup_awd_nodes,
+    "231": handle_patient_followup_awd_metastatic,
+    "93": handle_clinical_stage_regional_nodes,
+    "94": handle_clinical_stage_distant_metastases,
+    "187": handle_biopsy_mitotic_count_hpf,
+    "188": handle_biopsy_mitotic_count_mm2,  # new
 }
 
 SPECIAL_HANDLERS_AFTER: Dict[str, Handler] = {

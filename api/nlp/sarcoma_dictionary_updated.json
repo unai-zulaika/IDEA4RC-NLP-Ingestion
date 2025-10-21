@@ -1471,8 +1471,8 @@
     "parameters": []
   },
   "228": {
-      "sentence_id": 228,
-      "sentence_name": "Alive, No Evidence of Disease (NED)",
+    "sentence_id": 228,
+    "sentence_name": "Alive, No Evidence of Disease (NED)",
     "sentence_content": "Status of the patient at last follow-up: Alive, No Evidence of Disease (NED)",
     "parameters": []
   },
@@ -3143,7 +3143,7 @@
         "parameter_name": "mitoses count",
         "parameter_type": "NUMBER",
         "possible_values": [],
-        "associated_variable": "Diagnosis_biopsyMitoticCount"
+        "associated_variable": "Diagnosis.biopsyMitoticCount"
       },
       {
         "parameter_name": "number of HPFs",
@@ -3548,7 +3548,7 @@
             "unknown": "4129922"
           }
         ],
-        "associated_variable": "SystemicTreatment_treatmentResponse"
+        "associated_variable": "SystemicTreatment.treatmentResponse"
       }
     ]
   },

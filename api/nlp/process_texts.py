@@ -441,6 +441,44 @@ def process_llm_annotations_with_regex(
     skipped_count = 0
     error_count = 0
 
+    def _find_nearby_group_record_id(patient_id: str, entity_prefix: str, note_date_str: str) -> int | None:
+        """
+        Find an existing record_id for the same entity (by core_variable prefix) within ±14 days.
+        Searches both existing excel_data and staged new_rows.
+        """
+        annotation_dt = _parse_date_any(_to_str(note_date_str))
+        if not annotation_dt:
+            return None
+        candidates: list[tuple[int, int]] = []
+
+        def consider_row(row: dict | pandas.Series) -> None:
+            try:
+                if _to_str(row.get("patient_id")) != _to_str(patient_id):
+                    return
+                cv = _to_str(row.get("core_variable"))
+                if not cv.startswith(entity_prefix):
+                    return
+                dt = _parse_date_any(_to_str(row.get("date_ref")))
+                if not dt:
+                    return
+                delta = abs((annotation_dt - dt).days)
+                if delta <= 14:
+                    rid = int(row.get("record_id"))
+                    candidates.append((delta, rid))
+            except Exception:
+                return
+
+        if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
+            for _, er in excel_data.iterrows():
+                consider_row(er)
+        for sr in new_rows:
+            consider_row(sr)
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        return candidates[0][1]
+
     print(f"[DEBUG] Processing {len(llm_annotations)} LLM annotations...")
     print("[DEBUG] ========================================")
 
@@ -545,7 +583,7 @@ def process_llm_annotations_with_regex(
                                 continue
                             if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
                                 continue
-                            # Respect provided record_id if present; otherwise allocate a new one
+                            # Respect provided record_id; otherwise reuse nearby group or allocate new
                             if "record_id" in sr and _to_str(sr["record_id"]):
                                 try:
                                     max_record_id = max(
@@ -553,8 +591,18 @@ def process_llm_annotations_with_regex(
                                 except (TypeError, ValueError):
                                     pass
                             else:
-                                max_record_id += 1
-                                sr["record_id"] = max_record_id
+                                date_ref_sr = _to_str(
+                                    sr.get("date_ref") or date)
+                                entity_prefix = cv.split(".", 1)[0] + "."
+                                reuse_id = _find_nearby_group_record_id(
+                                    patient_id, entity_prefix, date_ref_sr)
+                                if reuse_id is not None:
+                                    sr["record_id"] = reuse_id
+                                    max_record_id = max(
+                                        max_record_id, reuse_id)
+                                else:
+                                    max_record_id += 1
+                                    sr["record_id"] = max_record_id
                             sr.setdefault("types", "string")
                             new_rows.append(sr)
 
@@ -626,7 +674,7 @@ def process_llm_annotations_with_regex(
                                 continue
                             if _is_duplicate_row(excel_data, new_rows, sr.get("patient_id"), cv, val, sr.get("date_ref")):
                                 continue
-                            # Respect provided record_id if present; otherwise allocate a new one
+                            # Respect provided record_id; otherwise reuse nearby group or allocate new
                             if "record_id" in sr and _to_str(sr["record_id"]):
                                 try:
                                     max_record_id = max(
@@ -634,8 +682,18 @@ def process_llm_annotations_with_regex(
                                 except (TypeError, ValueError):
                                     pass
                             else:
-                                max_record_id += 1
-                                sr["record_id"] = max_record_id
+                                date_ref_sr = _to_str(
+                                    sr.get("date_ref") or date)
+                                entity_prefix = cv.split(".", 1)[0] + "."
+                                reuse_id = _find_nearby_group_record_id(
+                                    patient_id, entity_prefix, date_ref_sr)
+                                if reuse_id is not None:
+                                    sr["record_id"] = reuse_id
+                                    max_record_id = max(
+                                        max_record_id, reuse_id)
+                                else:
+                                    max_record_id += 1
+                                    sr["record_id"] = max_record_id
                             sr.setdefault("types", "string")
                             new_rows.append(sr)
                             appended += 1
@@ -792,18 +850,26 @@ def process_llm_annotations_with_regex(
                                 new_rows.append(sr)
                         continue
 
-                    # Only now assign record_id and append
-                    max_record_id += 1
+                    # Only now assign record_id (reuse nearby group or allocate) and append
+                    entity_prefix = assoc_var_str.split(".", 1)[0] + "."
+                    reuse_id = _find_nearby_group_record_id(
+                        patient_id, entity_prefix, date)
+                    if reuse_id is not None:
+                        assigned_rid = reuse_id
+                        max_record_id = max(max_record_id, reuse_id)
+                    else:
+                        max_record_id += 1
+                        assigned_rid = max_record_id
                     new_row = {
                         "patient_id": patient_id,
                         "original_source": "NLP_LLM",
                         "core_variable": assoc_var_str,
                         "date_ref": date,
                         "value": value,
-                        "record_id": max_record_id,
+                        "record_id": assigned_rid,
                         "note_id": note_id,
                         "prompt_type": prompt_type,
-                        "types": types_map.get(param_type, "NOT SPECIFIED")
+                        "types": types_map.get(param_type, "NOT SPECIFIED"),
                     }
                     new_rows.append(new_row)
 
@@ -819,7 +885,8 @@ def process_llm_annotations_with_regex(
                         # NEW: trigger for 219 anchored on RegionalDeepHyperthemia.startDate
                         or (str(annotation_id) == "219" and assoc_var_str == "RegionalDeepHyperthemia.startDate")
                     ):
-                        base_record_id = max_record_id  # record_id just assigned to this row
+                        # record_id assigned to this row (reused or new)
+                        base_record_id = assigned_rid
                         ctx_after = {
                             "annotation_id": str(annotation_id),
                             "annotation_data": annotation_data,
