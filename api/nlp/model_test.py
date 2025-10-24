@@ -16,6 +16,8 @@ init_model(MODEL_PATH)
 STORE = FewShotStore()
 
 fewshots = STORE.topk("histology", "Microscopy confirms liposarcoma.", k=2)
+print(fewshots)
+
 prompt = get_prompt("histology", fewshots, "Microscopy confirms liposarcoma.")
 res = run_model_with_prompt(prompt)
 print(f"Prompt:\n{prompt}\n")
