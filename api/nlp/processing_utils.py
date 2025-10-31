@@ -51,24 +51,51 @@ def is_invalid_value(param_type: str, value: Any) -> bool:
 
 
 def is_duplicate_row(
-    excel_data: pandas.DataFrame,
+    existing_rows: pandas.DataFrame | None,
     staged_rows: List[dict[str, Any]],
-    patient_id: str,
+    patient_id: Any,
     core_variable: str,
     value: Any,
-    date_ref: str,
+    date_ref: Any,
 ) -> bool:
-    """Check if a row already exists in excel_data or staged rows."""
-    if "patient_id" in excel_data.columns and not excel_data.empty:
-        existing_rows = excel_data[excel_data["patient_id"] == patient_id]
-        if not existing_rows.empty:
-            dup = existing_rows[
-                (existing_rows["core_variable"] == core_variable)
-                & (existing_rows["value"].astype(str) == to_str(value))
-                & (existing_rows["date_ref"].astype(str) == to_str(date_ref))
+    """Check if a row with the same patient_id, core_variable, value, and date_ref
+    already exists in either existing_rows (DataFrame) or staged_rows (list of dicts).
+
+    Args:
+        existing_rows: Existing DataFrame (e.g., excel_data)
+        staged_rows: List of staged row dictionaries
+        patient_id: Patient identifier
+        core_variable: Core variable name
+        value: Value to check
+        date_ref: Reference date
+
+    Returns:
+        True if duplicate exists, False otherwise
+    """
+    # Normalize inputs
+    patient_id_str = to_str(patient_id)
+    core_variable_str = to_str(core_variable)
+    value_str = to_str(value)
+    date_ref_str = to_str(date_ref)
+
+    # Check existing DataFrame
+    if isinstance(existing_rows, pandas.DataFrame) and not existing_rows.empty:
+        # Check for required columns before filtering
+        required_cols = {"patient_id", "core_variable", "value", "date_ref"}
+        if not required_cols.issubset(existing_rows.columns):
+            # Skip DataFrame check if columns missing
+            pass
+        else:
+            matches = existing_rows[
+                (existing_rows["patient_id"] == patient_id_str)
+                & (existing_rows["core_variable"] == core_variable_str)
+                & (existing_rows["value"].astype(str) == value_str)
+                & (existing_rows["date_ref"].astype(str) == date_ref_str)
             ]
-            if not dup.empty:
+            if not matches.empty:
                 return True
+
+    # Check staged rows
     for row in staged_rows:
         if (
             row.get("patient_id") == patient_id

@@ -146,8 +146,11 @@ def _find_recent_episode_event_id(
             return
 
     if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
-        subset = excel_data[excel_data.get(
-            "core_variable") == "EpisodeEvent.dateOfEpisode"]
+        if "core_variable" in excel_data.columns:
+            subset = excel_data[excel_data["core_variable"]
+                                == "EpisodeEvent.dateOfEpisode"]
+        else:
+            subset = pandas.DataFrame()
         for _, row in subset.iterrows():
             if to_str(row.get("patient_id")) != to_str(patient_id):
                 continue
@@ -563,7 +566,10 @@ def _find_nearby_disease_extent_group(
     candidates: List[tuple[int, int]] = []  # (abs_days, record_id)
 
     if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
-        subset = excel_data[excel_data.get("patient_id") == patient_id]
+        if "patient_id" in excel_data.columns:
+            subset = excel_data[excel_data["patient_id"] == patient_id]
+        else:
+            subset = pandas.DataFrame()
         for _, row in subset.iterrows():
             if not is_dx(row.get("core_variable")):
                 continue
@@ -619,8 +625,11 @@ def _find_latest_episode_event_id(
             return
 
     if isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
-        subset = excel_data[excel_data.get(
-            "core_variable") == "EpisodeEvent.dateOfEpisode"]
+        if "core_variable" in excel_data.columns:
+            subset = excel_data[excel_data["core_variable"]
+                                == "EpisodeEvent.dateOfEpisode"]
+        else:
+            subset = pandas.DataFrame()
         for _, row in subset.iterrows():
             if to_str(row.get("patient_id")) != to_str(patient_id):
                 continue
@@ -799,10 +808,13 @@ def handle_regional_deep_hyperthermia_link(ctx: Dict[str, Any]) -> List[Dict[str
 
         # Look into excel_data if still not found
         if not base_record_id and isinstance(excel_data, pandas.DataFrame) and not excel_data.empty:
-            subset = excel_data[
-                (excel_data.get("patient_id") == patient_id)
-                & (excel_data.get("core_variable") == "RegionalDeepHyperthemia.startDate")
-            ]
+            if "patient_id" in excel_data.columns and "core_variable" in excel_data.columns:
+                subset = excel_data[
+                    (excel_data["patient_id"] == patient_id)
+                    & (excel_data["core_variable"] == "RegionalDeepHyperthemia.startDate")
+                ]
+            else:
+                subset = pandas.DataFrame()
             if not subset.empty:
                 try:
                     base_record_id = int(subset.iloc[-1]["record_id"])

@@ -109,6 +109,13 @@ st.write(
 if "task_id" not in st.session_state:
     st.session_state.task_id = None
 
+# Disease type selector for full pipeline
+disease_type_full = st.selectbox(
+    "Select disease type:",
+    options=["sarcoma", "head_and_neck"],
+    key="disease_type_full"
+)
+
 # File upload section
 uploaded_excel = st.file_uploader(
     "Upload a file with the structured data (Excel or CSV)", type=["xlsx", "csv"], key="excel_uploader"
@@ -142,8 +149,12 @@ if start_clicked:
             text_mime,
         ),
     }
-    # Start the pipeline
-    response = requests.post(_api("/pipeline"), files=files, timeout=30)
+    response = requests.post(
+        _api("/pipeline"),
+        files=files,
+        params={"disease_type": disease_type_full},
+        timeout=30
+    )
     if response.status_code == 200:
         st.session_state.task_id = response.json()["task_id"]
         _store["last_task_id"] = st.session_state.task_id  # persist last
@@ -190,6 +201,13 @@ if st.session_state.task_id:
 st.divider()
 st.title("_OPTION 2_ :blue[Run the linking service]")
 
+# Disease type selector for linking
+disease_type_link = st.selectbox(
+    "Select disease type:",
+    options=["sarcoma", "head_and_neck"],
+    key="disease_type_link"
+)
+
 uploaded_linking_file = st.file_uploader(
     "Upload a file to run the linking service (Excel or CSV)",
     type=["xlsx", "csv"],
@@ -211,7 +229,12 @@ if link_btn:
             link_mime,
         )
     }
-    resp = requests.post(_api("/run/link_rows"), files=files, timeout=30)
+    resp = requests.post(
+        _api("/run/link_rows"),
+        files=files,
+        params={"disease_type": disease_type_link},
+        timeout=30
+    )
 
     if resp.status_code != 200:
         st.error(resp.json().get("detail", "Failed to start linking service."))
@@ -259,6 +282,13 @@ st.title("_OPTION 3_ :blue[Just quality checks]")
 
 st.write("### Run Quality Check on a File")
 
+# Disease type selector for quality check
+disease_type_qc = st.selectbox(
+    "Select disease type:",
+    options=["sarcoma", "head_and_neck"],
+    key="disease_type_qc"
+)
+
 uploaded_qc_file = st.file_uploader(
     "Upload a file to run quality check (Excel or CSV)", type=["xlsx", "csv"], key="qc_file_uploader"
 )
@@ -278,7 +308,12 @@ if qc_btn:
             qc_mime,
         )
     }
-    resp = requests.post(_api("/run/quality_check"), files=files, timeout=30)
+    resp = requests.post(
+        _api("/run/quality_check"),
+        files=files,
+        params={"disease_type": disease_type_qc},
+        timeout=30
+    )
 
     if resp.status_code != 200:
         st.error(resp.json().get(
@@ -348,6 +383,13 @@ st.title("_OPTION 4_ :blue[Run ETL]")
 
 st.write("### Run ETL on a File")
 
+# Disease type selector for ETL
+disease_type_etl = st.selectbox(
+    "Select disease type:",
+    options=["sarcoma", "head_and_neck"],
+    key="disease_type_etl"
+)
+
 uploaded_etl_file = st.file_uploader(
     "Upload a file to run ETL", type=["xlsx", "csv"], key="etl_file_uploader"
 )
@@ -366,8 +408,12 @@ if etl_btn:
         )
     }
     try:
+        # Add disease_type parameter to ETL upload
         upload_response = requests.post(
-            f"http://{ETL_HOST}/etl/upload", files=files)
+            f"http://{ETL_HOST}/etl/upload",
+            files=files,
+            params={"disease_type": disease_type_etl}
+        )
         if upload_response.status_code == 200:
             st.success("Final file successfully uploaded!")
         else:
@@ -377,7 +423,10 @@ if etl_btn:
         st.error(f"Upload failed: {e}")
 
     response = requests.post(
-        f"http://{mode}/results/quality_check", files=files)
+        f"http://{mode}/results/quality_check",
+        files=files,
+        params={"disease_type": disease_type_etl}
+    )
 
     if response.status_code == 200:
         st.success("Quality check completed successfully. Download result below:")
