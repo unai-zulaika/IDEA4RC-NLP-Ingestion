@@ -110,31 +110,7 @@ def read_table(path: str, **pd_kwargs) -> pd.DataFrame:
     raise ValueError(f"Unsupported file type for input data: {ext}")
 
 
-def crosstab_external_user(df_matrix, output_csv_path):
-    """
-    Writes a semicolon-delimited CSV with only:
-    Variable;Importance;First phase;MissingPercent
-    """
-    dfm = df_matrix.copy()
-    cols_to_keep = [c for c in ["Variable", "Importance",
-                                "First phase", "MissingPercent"] if c in dfm.columns]
-    reduced = dfm[cols_to_keep].copy()
-    if "MissingPercent" in reduced.columns:
-        reduced["MissingPercent"] = pd.to_numeric(
-            reduced["MissingPercent"], errors="coerce")
-
-    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
-    with open(output_csv_path, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh, delimiter=";")
-        w.writerow(cols_to_keep)
-        for _, r in reduced.iterrows():
-            row_vals = [("" if pd.isna(r[col]) else str(r[col]))
-                        for col in cols_to_keep]
-            w.writerow(row_vals)
-    print(f"Wrote external crosstab to: {output_csv_path}")
-
-
-def prepare_repeatable_entity_data(entity_name, original_data_filepath, repeatable_entities_config, app_path):
+def prepare_repeatable_entity_data(entity_name, original_data_filepath, repeatable_entities_config, app_path, allowed_tags):
     """
     Reads the original long-format data, filters for variables of a specific repeatable entity,
     and pivots it to a wide format where each row is a unique instance of that entity.
@@ -185,8 +161,9 @@ def prepare_repeatable_entity_data(entity_name, original_data_filepath, repeatab
     entity_core_variables = [
         f"{entity_name}.{v}" for v in variable_short_names
     ]
+    # apply tumour-type filter
     entity_core_variables = [
-        v for v in entity_core_variables if keep(v)]   # NEW
+        v for v in entity_core_variables if keep(v, allowed_tags)]
 
     # Filter for rows that contain the core variables for the specified entity
     df_entity_long = df_source[df_source['core_variable'].isin(
@@ -282,6 +259,7 @@ def format_normalized_table(filename, formated_filepath, non_repeatable_vars_set
 
 def quality_check(data, disease_type="sarcoma"):
     ALLOWED = {disease_type, "both"}
+    print(f"Quality Check initialized for disease type: {disease_type}")
     data_file = data
     repeated_entities_file = "/app/quality_checks/repeteable_entities.json"
     suites_file = "/app/quality_checks/expectations_data.json"
@@ -641,7 +619,8 @@ def quality_check(data, disease_type="sarcoma"):
                             entity_name_for_routing,
                             data_file,
                             repeated_entities_data["repeteables"],
-                            app_path
+                            app_path,
+                            ALLOWED
                         )
                         if not df_entity.empty:
                             # NEW: coerce repeatable DF types before building validator
@@ -679,7 +658,8 @@ def quality_check(data, disease_type="sarcoma"):
                             entity_name_for_routing,
                             data_file,
                             repeated_entities_data.get("repeteables", {}),
-                            app_path
+                            app_path,
+                            ALLOWED
                         )
                         if not df_entity.empty:
                             df_entity = _coerce_df_numeric_types(
@@ -1090,9 +1070,13 @@ def quality_check(data, disease_type="sarcoma"):
     # Figure out which columns actually had a NOT-NULL check
     # ------------------------------------------------------------------
     NULL_EXP = "expect_column_values_to_not_be_null"
+    var_counts = collections.defaultdict(lambda: [0, 0])
+
     notnull_vars = set()
 
-    for chk in all_checkpoint_result_dicts:
+    for item in all_checkpoint_result_dicts if all_checkpoint_result_dicts else all_checkpoint_results_with_source:
+        chk = item if isinstance(item, dict) else (
+            item[1] if isinstance(item, tuple) else None)
         if not chk:
             continue
         for run in chk.get("run_results", {}).values():
@@ -1152,7 +1136,9 @@ def quality_check(data, disease_type="sarcoma"):
     # var → [element_count, unexpected_count]
     var_counts = collections.defaultdict(lambda: [0, 0])
 
-    for chk in all_checkpoint_result_dicts:
+    for item in all_checkpoint_result_dicts if all_checkpoint_result_dicts else all_checkpoint_results_with_source:
+        chk = item if isinstance(item, dict) else (
+            item[1] if isinstance(item, tuple) else None)
         if not chk:
             continue
         for _, run in chk.get("run_results", {}).items():
@@ -1221,7 +1207,9 @@ def quality_check(data, disease_type="sarcoma"):
         "Total": {"Passed": 0, "Failed": 0, "Total": 0},
     })
 
-    for chk in all_checkpoint_result_dicts:
+    for item in all_checkpoint_result_dicts if all_checkpoint_result_dicts else all_checkpoint_results_with_source:
+        chk = item if isinstance(item, dict) else (
+            item[1] if isinstance(item, tuple) else None)
         if not chk:
             continue
         for _, run in chk.get("run_results", {}).items():
@@ -1278,7 +1266,9 @@ def quality_check(data, disease_type="sarcoma"):
     ds_pat_counts = collections.defaultdict(
         lambda: collections.defaultdict(lambda: {"tot": 0, "fail": 0})
     )
-    for chk in all_checkpoint_result_dicts:
+    for item in all_checkpoint_result_dicts if all_checkpoint_result_dicts else all_checkpoint_results_with_source:
+        chk = item if isinstance(item, dict) else (
+            item[1] if isinstance(item, tuple) else None)
         if not chk:
             continue
         for _, run in chk.get("run_results", {}).items():
@@ -2063,8 +2053,7 @@ def quality_check(data, disease_type="sarcoma"):
     try:
         with open(importance_file, encoding="utf-8") as fh:
             raw_map = json.load(fh)
-        importance_map = {_norm(k.replace(".", "_"))
-                                : v for k, v in raw_map.items()}
+        importance_map = {_norm(k.replace(".", "_"))                          : v for k, v in raw_map.items()}
     except Exception as e:
         print(f"WARNING loading variable_importance.json: {e}")
 
@@ -2103,7 +2092,9 @@ def quality_check(data, disease_type="sarcoma"):
     # 4️⃣ patient-level failures per group (threshold-based on NOT-NULL)
     group_pat_counts = {g: collections.defaultdict(
         lambda: {"tot": 0, "fail": 0}) for g in group_vars}
-    for chk in all_checkpoint_result_dicts:
+    for item in all_checkpoint_result_dicts if all_checkpoint_result_dicts else all_checkpoint_results_with_source:
+        chk = item if isinstance(item, dict) else (
+            item[1] if isinstance(item, tuple) else None)
         if not chk:
             continue
         for _, run in chk.get("run_results", {}).items():
@@ -2201,9 +2192,6 @@ def quality_check(data, disease_type="sarcoma"):
             if len(full_dm_group_vars[grp]) > 0 else "not computed",
 
             # NEW: threshold-based patient counts
-            "total_patients":        p_tot,
-            "failed_patients":       p_fail,
-            "passed_patients":       p_pass,
             "complete_patients_percentage": round((p_pass / p_tot) * 100, 2) if p_tot else "not computed",
             "missing_patients_percentage": round((p_fail / p_tot) * 100, 2) if p_tot else "not computed",
 
@@ -2237,7 +2225,9 @@ def quality_check(data, disease_type="sarcoma"):
     qc_pat_fail = collections.defaultdict(set)
 
     # ── POPULATE qc_summary_data and helper sets (now with per-patient totals/fails) ──
-    for chk in all_checkpoint_result_dicts:
+    for item in all_checkpoint_result_dicts if all_checkpoint_result_dicts else all_checkpoint_results_with_source:
+        chk = item if isinstance(item, dict) else (
+            item[1] if isinstance(item, tuple) else None)
         if not chk:
             continue
         for run in chk.get("run_results", {}).values():
@@ -2428,8 +2418,225 @@ def quality_check(data, disease_type="sarcoma"):
                            "qc_summary_results.json"), "w", encoding="utf-8") as fh:
         json.dump(rows_for_json, fh, indent=4)
 
-    
     # --- Phase report: nearest Dx / Progression / Recurrence in time -----------
+    print("\n--- Generating phase summary using temporal proximity -------------")
+
+    if df_long_all.empty:
+        print("No data, skipping phase report")
+    else:
+        # 1️⃣  helper to coerce any date‐ish value to a pandas Timestamp
+        def to_ts(val):
+            try:
+                return pd.to_datetime(val, errors="coerce")
+            except Exception:
+                return pd.NaT
+
+            # 2️⃣  collect phase-defining events for each patient
+        #     we now rely on *real* dates:
+        #       • Diagnosis.dateOfDiagnosis             → Diagnosis
+        #       • EpisodeEvent.diseaseStatus (+ its     → Progression / Recurrence
+        #         companion EpisodeEvent.dateOfEpisode)   timestamp)
+        # ---------------------------------------------------------------------
+
+        # --- quick look-ups ---------------------------------------------------
+        epi_date_lookup = (
+            df_long_all[df_long_all.core_variable ==
+                        "EpisodeEvent.dateOfEpisode"]
+            .set_index(["patient_id", "record_id"])["value"]
+            .to_dict()
+        )
+
+        # Sometimes a disease-status row has no episode date; we fall back to the
+        # patient’s diagnosis date (earliest one in the file).
+        diag_lookup = (
+            df_long_all[df_long_all.core_variable ==
+                        "Diagnosis.dateOfDiagnosis"]
+            .sort_values("value")            # earliest first
+            .drop_duplicates("patient_id")   # keep 1 / patient
+            .set_index("patient_id")["value"]
+            .to_dict()
+        )
+        # ---------------------------------------------------------------------
+
+        phase_events = []          # rows: patient_id, phase, date
+
+        for _, r in df_long_all.iterrows():
+
+            # ───────────── EpisodeEvent.diseaseStatus  ─────────────
+            if r.core_variable == "EpisodeEvent.diseaseStatus":
+                code = str(r.value).strip()
+                if code == "32949":
+                    phase = "Progression"
+                elif code == "2000100002":
+                    phase = "Recurrence"
+                else:
+                    phase = "Diagnosis"   # any other value
+
+                # ① try episode-date that belongs to the *same* (pid, rid)
+                dt_raw = epi_date_lookup.get((r.patient_id, r.record_id))
+
+                # ② otherwise fall back to patient’s Diagnosis date (if any)
+                if dt_raw is None:
+                    dt_raw = diag_lookup.get(r.patient_id)
+
+                phase_events.append((r.patient_id, phase, to_ts(dt_raw)))
+
+            # ───────────── Diagnosis.dateOfDiagnosis  ─────────────
+            elif r.core_variable == "Diagnosis.dateOfDiagnosis":
+                phase_events.append(
+                    (r.patient_id, "Diagnosis", to_ts(r.value))
+                )
+
+        phase_df = pd.DataFrame(phase_events, columns=[
+            "pid", "phase", "date"]).dropna()
+
+        # keep earliest Diagnosis, keep all Prog/Rec events
+        phase_df = (phase_df.sort_values("date")
+                    .drop_duplicates(subset=["pid", "phase"], keep="first"))
+        # print rows from phase_df where phase is not "Diagnosis"
+        test = phase_df[phase_df.phase != "Diagnosis"]
+
+        # 3️⃣  work out a single date for every record
+        record_dates = (df_long_all.assign(date=df_long_all.apply(
+            lambda r: to_ts(
+                r.value) if "date" in r.core_variable.lower() else pd.NaT,
+            axis=1))
+            .groupby(["patient_id", "record_id"])["date"]
+            .min()
+            .reset_index())
+
+        # 4️⃣  map each record to the closest *past* status event (same patient)
+        def closest_phase(row):
+            pid, dt = row.patient_id, row.date
+            if pd.isna(dt):                       # record has no usable date
+                return "Diagnosis"
+
+            # candidate events for that patient that happened on / before this record
+            cand = phase_df[(phase_df.pid == pid) & (phase_df.date <= dt)]
+
+            if cand.empty:                        # no past event ⇒ assume diagnosis
+                return "Diagnosis"
+
+            # smallest positive time‐gap (dt – event_date)
+            idx = (dt - cand.date).idxmin()
+            return cand.loc[idx, "phase"]
+
+        record_dates["phase"] = record_dates.apply(closest_phase, axis=1)
+
+        # 5️⃣  join back to every row
+        df_with_phase = df_long_all.merge(
+            record_dates[["patient_id", "record_id", "phase"]],
+            on=["patient_id", "record_id"],
+            how="left"
+        )
+
+        # 6️⃣  aggregate missingness
+        focus = df_with_phase[df_with_phase.core_variable.isin(notnull_vars)]
+
+        phase_stats = {
+            p: {"Phase": p, "Total": 0, "Missing": 0}
+            for p in ["Diagnosis", "Progression", "Recurrence"]
+        }
+
+        phase_patient_total = collections.defaultdict(
+            set)   # phase → {pids seen}
+        phase_patient_missing = collections.defaultdict(
+            set)   # phase → {pids with ≥1 NA}
+
+        for _, r in focus.iterrows():
+            ph = r.phase                           # Diagnosis / Progression / Recurrence
+            phase_stats[ph]["Total"] += 1
+            phase_patient_total[ph].add(r.patient_id)
+            if pd.isna(r.value) or str(r.value).strip() == "":
+                phase_stats[ph]["Missing"] += 1
+                phase_patient_missing[ph].add(r.patient_id)
+
+        for rec in phase_stats.values():
+            rec["Present"] = rec["Total"] - rec["Missing"]
+            rec["MissingPercent_Variable"] = (
+                round(rec["Missing"] / rec["Total"] *
+                      100, 2) if rec["Total"] else 0.0
+            )
+            # patient-denominator
+            p_tot = len(phase_patient_total[rec["Phase"]])
+            p_mis = len(phase_patient_missing[rec["Phase"]])
+            rec["MissingPercent_Patient"] = (
+                round(p_mis / p_tot * 100, 2) if p_tot else 0.0
+            )
+
+        out_path = os.path.join(
+            app_path, "phase_missingness_results.json")
+        with open(out_path, "w", encoding="utf-8") as fh:
+            json.dump(list(phase_stats.values()), fh, indent=4)
+
+        print(f"Phase summary saved to: {out_path}")
+    # ---------------------------------------------------------------------------
+
+    # --- Phase × Entity presence summary ---------------------------------------
+    # Creates phase_entity_results.json for the UI “By phase” tab
+    phase_entity = {}     # (entity_instance, phase) → present-counter
+
+    # focus_rows = df_with_phase[df_with_phase.core_variable.isin(notnull_vars)]
+    focus_rows = df_with_phase
+
+    for _, r in focus_rows.iterrows():
+        # entity name (e.g. "Surgery") + its record_id to keep instances separate
+        # Surgery / RadiotherapySession …
+        ent = r.core_variable.split('.')[0]
+        ent_inst = f"{ent}{r.record_id or ''}"       # Surgery1, Surgery2 …
+        key = (ent_inst, r.phase)
+
+        rec = phase_entity.setdefault(
+            key, {"Entity": ent_inst, "Phase": r.phase, "Present": 0}
+        )
+        # count a variable as “present” if it’s non-null/non-blank
+        if pd.notna(r.value) and str(r.value).strip():
+            rec["Present"] += 1
+
+    phase_entity_json = os.path.join(
+        app_path, "phase_entity_results.json")
+    with open(phase_entity_json, "w", encoding="utf-8") as fh:
+        json.dump(list(phase_entity.values()), fh, indent=4)
+
+    print(f"Phase-entity summary saved to: {phase_entity_json}")
+
+    # --- Phase × Entity × Patient summary --------------------------------------
+    patient_phase_entity = {}      # (pid, ent_inst, phase) → counters
+
+    for _, r in focus_rows.iterrows():
+        ent = r.core_variable.split('.')[0]          # Surgery / Biopsy / …
+        # Surgery1, Surgery2 …
+        ent_inst = f"{ent}{r.record_id or ''}"
+        key = (r.patient_id, ent_inst, r.phase)
+
+        rec = patient_phase_entity.setdefault(
+            key,
+            {
+                "PatientID": str(r.patient_id),
+                "Entity":    ent_inst,
+                "Phase":     r.phase,
+                "Total":     0,
+                "Present":   0,
+                "Missing":   [],  # ⬅︎  new
+            }
+        )
+
+        rec["Total"] += 1
+        if pd.notna(r.value) and str(r.value).strip():
+            rec["Present"] += 1
+        else:
+            rec["Missing"].append(r.core_variable)
+
+    rec["Complete"] = rec["Present"] == rec["Total"]
+
+    # ── decide completeness ────────────────────────────────────────────────────
+    for rec in patient_phase_entity.values():
+        rec["Complete"] = rec["Present"] == rec["Total"]    # True / False
+
+    out = os.path.join(app_path, "patient_entity_phase_results.json")
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(list(patient_phase_entity.values()), fh, indent=4)
+    print(f"Patient-entity-phase summary saved to: {out}")
 
     # NEW: Safety initializations for removed summaries
     if 'patient_summary_data_aggregated' not in locals():
@@ -2452,8 +2659,8 @@ def quality_check(data, disease_type="sarcoma"):
             # every variable is ‘tested’ for every patient once
             key = (pid, grp)
             rec = per_patient_imp.setdefault(key,
-                                            {"PatientID": pid, "Group": grp,
-                                            "Passed": 0, "Failed": 0, "Total": 0})
+                                             {"PatientID": pid, "Group": grp,
+                                              "Passed": 0, "Failed": 0, "Total": 0})
             rec["Total"] += stats["Total"]
             rec["Failed"] += stats["Failed"]
 
@@ -2464,7 +2671,7 @@ def quality_check(data, disease_type="sarcoma"):
 
     out = list(per_patient_imp.values())
     with open(os.path.join(app_path,
-            "patient_importance_summary_results.json"), "w") as fh:
+                           "patient_importance_summary_results.json"), "w") as fh:
         json.dump(out, fh, indent=4)
     print("Patient-importance summary written.")
 
@@ -2484,7 +2691,7 @@ def quality_check(data, disease_type="sarcoma"):
             continue
         key = (r.patient_id, r.phase)
         rec = per_patient_phase.setdefault(key,
-                                        {"PatientID": r.patient_id, "Phase": r.phase,
+                                           {"PatientID": r.patient_id, "Phase": r.phase,
                                             "Present": 0, "Missing": 0, "Total": 0})
         rec["Total"] += 1
         if pd.isna(r.value) or str(r.value).strip() == "":
@@ -2498,10 +2705,9 @@ def quality_check(data, disease_type="sarcoma"):
 
     out = list(per_patient_phase.values())
     with open(os.path.join(app_path,
-            "patient_phase_summary_results.json"), "w") as fh:
+                           "patient_phase_summary_results.json"), "w") as fh:
         json.dump(out, fh, indent=4)
     print("Patient-phase summary written.")
-
 
     # ─────────────────────────────────────────────────────────────────────────────
     #  Variable × Patient missing‑matrix report
@@ -2513,7 +2719,8 @@ def quality_check(data, disease_type="sarcoma"):
     vars_in_data = set()
     if not df_long_all.empty and "core_variable" in df_long_all.columns:
         vars_in_data = set(df_long_all["core_variable"].astype(str).unique())
-    candidate_vars = ((all_core_variables_filtered & vars_in_data) | notnull_vars)
+    candidate_vars = ((all_core_variables_filtered &
+                      vars_in_data) | notnull_vars)
 
     # --- NEW: custom ordering (entity order, then variable order from config) ---
     _BIG = 10_000_000
@@ -2532,15 +2739,14 @@ def quality_check(data, disease_type="sarcoma"):
     except Exception:
         pass
 
-
     def _var_sort_key(v: str):
         ent = v.split(".", 1)[0]
         return (
             entity_rank.get(ent, _BIG),      # entity block order
-            var_rank.get(v, _BIG),           # in-entity field order from config
+            # in-entity field order from config
+            var_rank.get(v, _BIG),
             v                                 # stable fallback
         )
-
 
     variables = sorted(candidate_vars, key=_var_sort_key)
 
@@ -2592,101 +2798,116 @@ def quality_check(data, disease_type="sarcoma"):
                     dated = grp.dropna(subset=["date"])
                     if not dated.empty:
                         return dated.sort_values("date").iloc[0]["phase"]
-                    ranked = grp.assign(_ord=grp["phase"].map(ORDER).fillna(999))
+                    ranked = grp.assign(
+                        _ord=grp["phase"].map(ORDER).fillna(999))
                     return ranked.sort_values("_ord").iloc[0]["phase"] if not ranked.empty else ""
 
                 firsts = tmp.groupby("entity", as_index=False).apply(
                     lambda g: pd.Series({"phase": _pick_first(g)})
                 )
                 first_phase_per_entity = dict(
-                    zip(firsts["entity"].astype(str), firsts["phase"].astype(str))
+                    zip(firsts["entity"].astype(str),
+                        firsts["phase"].astype(str))
                 )
         except Exception as e:
             print(f"  ⚠︎  Could not compute first phase per entity: {e}")
             first_phase_per_entity = {}
 
-        # ---------- 1⃣  derive *missing* instances straight from GE -----------
+    # NEW: compute LATEST phase per VARIABLE (preferred for the matrix)
+    last_phase_per_var = {}
+    try:
+        if 'df_with_phase' in locals() and not df_with_phase.empty:
+            lasts = df_with_phase.sort_values("date").drop_duplicates(
+                subset=["patient_id", "record_id", "core_variable"], keep="last")
+            last_phase_per_var = dict(
+                zip(lasts["core_variable"].astype(
+                    str), lasts["phase"].astype(str))
+            )
+    except Exception as e:
+        print(f"  ⚠︎  Could not compute last phase per variable: {e}")
+        last_phase_per_var = {}
 
-        # (var, pid) → how many entity instances failed NOT‑NULL
-        var_missing_inst = collections.defaultdict(int)
+    # ---------- 1⃣  derive *missing* instances straight from GE -----------
+    # Ensure defined regardless of conditions above
+    var_missing_inst = collections.defaultdict(int)
 
-        for chk in all_checkpoint_result_dicts:
-            if not chk:
-                continue
-            for run in chk.get("run_results", {}).values():
-                for out in run.get("validation_result", {}).get("results", []):
-                    cfg = out.get("expectation_config", {})
-                    if cfg.get("expectation_type") != "expect_column_values_to_not_be_null":
-                        continue
-                    var = cfg.get("kwargs", {}).get("column")
-                    if not var:
-                        continue
+    for item in all_checkpoint_result_dicts if all_checkpoint_result_dicts else all_checkpoint_results_with_source:
+        chk = item if isinstance(item, dict) else (
+            item[1] if isinstance(item, tuple) else None)
+        if not chk:
+            continue
+        for run in chk.get("run_results", {}).values():
+            for out in run.get("validation_result", {}).get("results", []):
+                cfg = out.get("expectation_config", {})
+                if cfg.get("expectation_type") != "expect_column_values_to_not_be_null":
+                    continue
+                var = cfg.get("kwargs", {}).get("column")
+                if not var:
+                    continue
 
-                    idx_list = (
-                        out.get("result", {}).get("unexpected_index_list")
-                        or out.get("result", {}).get("partial_unexpected_index_list")
-                        or []
-                    )
+                idx_list = (
+                    out.get("result", {}).get("unexpected_index_list")
+                    or out.get("result", {}).get("partial_unexpected_index_list")
+                    or []
+                )
 
-                    # each failing row carries patient_id (and record_id for repeatables)
-                    for idx in idx_list:
-                        if isinstance(idx, dict) and "patient_id" in idx:
-                            pid = str(idx["patient_id"])
-                            var_missing_inst[(var, pid)] += 1
+                for idx in idx_list:
+                    if isinstance(idx, dict) and "patient_id" in idx:
+                        pid = str(idx["patient_id"])
+                        var_missing_inst[(var, pid)] += 1
 
-                    # safeguard – if GE returned no indexes but reported failures,
-                    # mark *all* patients that own the entity as missing
-                    if out.get("result", {}).get("unexpected_count", 0) and not idx_list:
-                        entity = var.split(".", 1)[0]
-                        for pid in patient_ids:
-                            if ent_total_inst.get((pid, entity), 0):
-                                var_missing_inst[(var, pid)
-                                                ] = ent_total_inst[(pid, entity)]
+                if out.get("result", {}).get("unexpected_count", 0) and not idx_list:
+                    entity = var.split(".", 1)[0]
+                    for pid in patient_ids:
+                        if ent_total_inst.get((pid, entity), 0):
+                            var_missing_inst[(var, pid)
+                                             ] = ent_total_inst[(pid, entity)]
 
-        # ---------- 2⃣  build the matrix row‑by‑row ----------------------------
-        rows = []
-        for var in variables:
-            entity = var.split(".", 1)[0]
-            importance = _importance_label_for(var)
-            first_phase = first_phase_per_entity.get(entity, "")
+    # ---------- 2⃣  build the matrix row‑by‑row ----------------------------
+    rows = []
+    for var in variables:
+        entity = var.split(".", 1)[0]
+        importance = _importance_label_for(var)
+        # Prefer latest phase for this variable; fallback to earliest per entity
+        first_phase = last_phase_per_var.get(
+            var, first_phase_per_entity.get(entity, ""))
+        row, miss_cnt = {"Variable": var,
+                         "Importance": importance, "First phase": first_phase}, 0
 
-            row, miss_cnt = {"Variable": var,
-                            "Importance": importance, "First phase": first_phase}, 0
+        for pid in patient_ids:
+            total_inst = ent_total_inst.get(
+                (pid, entity), 0)                # all entity rows
+            missing_inst = var_missing_inst.get(
+                (var, pid), 0)                 # GE failures
+            filled_inst = max(0, total_inst - missing_inst)
 
-            for pid in patient_ids:
-                total_inst = ent_total_inst.get(
-                    (pid, entity), 0)                # all entity rows
-                missing_inst = var_missing_inst.get(
-                    (var, pid), 0)                 # GE failures
-                filled_inst = max(0, total_inst - missing_inst)
+            # decide cell label exactly like before, but using GE data
+            if total_inst == 0 and entity_min_card.get(entity, 1) == 0:
+                cell = "Not present"
+            elif filled_inst == 0:
+                cell = "Missing"
+                miss_cnt += 1
+            elif (
+                total_inst > 1 and entity in repeatable_entity_names
+                and filled_inst < total_inst
+            ):
+                cell = "Sometimes"
+            else:
+                cell = ""
 
-                # decide cell label exactly like before, but using GE data
-                if total_inst == 0 and entity_min_card.get(entity, 1) == 0:
-                    cell = "Not present"
-                elif filled_inst == 0:
-                    cell = "Missing"
-                    miss_cnt += 1
-                elif (
-                    total_inst > 1 and entity in repeatable_entity_names
-                    and filled_inst < total_inst
-                ):
-                    cell = "Sometimes"
-                else:
-                    cell = ""
+            row[pid] = cell
 
-                row[pid] = cell
-
-            row["MissingPercent"] = round(miss_cnt / len(patient_ids) * 100, 2)
-            rows.append(row)
+        row["MissingPercent"] = round(miss_cnt / len(patient_ids) * 100, 2)
+        rows.append(row)
 
         df_matrix = pd.DataFrame(
             rows, columns=["Variable", "Importance", "First phase",
-                        *patient_ids, "MissingPercent"]
+                           *patient_ids, "MissingPercent"]
         )
 
         # ---------- 3  per-patient % row ------------------------------------
         pat_row = {"Variable": "MissingPercentPerPatient",
-                "Importance": "", "First phase": ""}
+                   "Importance": "", "First phase": ""}
 
         for pid in patient_ids:
             pct = sum(df_matrix[pid] == "Missing") / len(variables) * 100
@@ -2694,7 +2915,7 @@ def quality_check(data, disease_type="sarcoma"):
             pat_row[pid] = pct
 
         df_matrix = pd.concat([df_matrix, pd.DataFrame([pat_row])],
-                            ignore_index=True)
+                              ignore_index=True)
 
         # ---------- 4  append Total [Importance] at [Phase] rows -------------
         combined_rows = []
@@ -2708,7 +2929,7 @@ def quality_check(data, disease_type="sarcoma"):
 
                     # FIX: Select variables of this importance level using normalized label
                     phase_variables = [v for v in variables
-                                    if _importance_label_for(v) == importance]
+                                       if _importance_label_for(v) == importance]
 
                     # Build summary row using exact same logic as main matrix
                     summary = {
@@ -2755,14 +2976,14 @@ def quality_check(data, disease_type="sarcoma"):
 
         if combined_rows:
             df_matrix = pd.concat([df_matrix, pd.DataFrame(combined_rows)],
-                                ignore_index=True)
+                                  ignore_index=True)
 
         # Ensure column order with First phase before MissingPercent
         if {"Variable", "Importance", "MissingPercent"}.issubset(df_matrix.columns):
             other_cols = [c for c in df_matrix.columns
-                        if c not in ("Variable", "Importance", "First phase", "MissingPercent")]
+                          if c not in ("Variable", "Importance", "First phase", "MissingPercent")]
             df_matrix = df_matrix[["Variable", "Importance",
-                                "First phase", "MissingPercent", *other_cols]]
+                                   "First phase", "MissingPercent", *other_cols]]
 
         # NEW: reorder rows so summary rows are at the top
         summary_order = [
@@ -2832,6 +3053,382 @@ def quality_check(data, disease_type="sarcoma"):
         json.dump(filled, fh, ensure_ascii=False, indent=2)
     print("Saved: /data/results/filled_metadata.json")
 
-    crosstab_external_user(df_matrix, os.path.join(
-        app_path, "/data/results/user_crosstab_external.csv"))
+    # crosstab_external_user(df_matrix, os.path.join(
+    #     app_path, "/data/results/user_crosstab_external.csv"))
     return data, []
+
+
+def build_missing_matrix_from_long_data(
+    data,
+    disease_type: str = "sarcoma",
+    repeated_entities_file: str = "/app/quality_checks/repeteable_entities.json",
+    entities_cardinality_file: str = "/app/quality_checks/entities_cardinality.json",
+    variable_importance_file: str = "/app/quality_checks/variable_importance.json",
+) -> pd.DataFrame:
+    """
+    Build the Variable × Patient missingness matrix (df_matrix) from a long-format input,
+    without requiring Great Expectations outputs. Uses the same rules/format as the script.
+
+    data can be:
+      - pandas.DataFrame (long format)
+      - path to .csv / .xlsx
+      - JSON-encoded list of paths (as used by the API)
+    """
+    ALLOWED = {disease_type, "both"}
+
+    # --- Load input into df_long_all ------------------------------------------------
+    if isinstance(data, pd.DataFrame):
+        df_long_all = data.copy()
+    else:
+        try:
+            candidate = json.loads(data)
+            if not isinstance(candidate, list):
+                raise ValueError
+            paths = candidate
+        except (json.JSONDecodeError, ValueError):
+            paths = [data]
+
+        dfs = []
+        for p in paths:
+            try:
+                dfs.append(read_table(p, dtype=str))
+            except Exception as e:
+                print(f"  ⚠︎  Skipping {p}: {e}")
+        if not dfs:
+            return pd.DataFrame()
+        df_long_all = pd.concat(dfs, ignore_index=True)
+
+    # normalise expected columns
+    for col in ["patient_id", "record_id", "core_variable", "value", "original_source"]:
+        if col not in df_long_all.columns:
+            df_long_all[col] = pd.NA
+    df_long_all["patient_id"] = df_long_all["patient_id"].astype(str)
+
+    # --- Load expectations metadata -------------------------------------------------
+    with open(repeated_entities_file, encoding="utf8") as f:
+        rep = json.load(f)
+    try:
+        with open(entities_cardinality_file, encoding="utf-8") as fh:
+            entity_min_card = json.load(fh)  # {"Patient":1, "Surgery":0, ...}
+    except Exception:
+        entity_min_card = {}
+
+    # classify entities
+    non_rep_ents = {e for e, card in entity_min_card.items(
+    ) if card == 1} if entity_min_card else set(rep.get("non_repeteables", {}).keys())
+    rep_ents = set(entity_min_card.keys(
+    )) - non_rep_ents if entity_min_card else set(rep.get("repeteables", {}).keys())
+
+    # full variable universe, filtered by tumour-type
+    all_core_variables_filtered = set()
+    for ent, shorts in (rep.get("non_repeteables") or {}).items():
+        for v in shorts:
+            full = f"{ent}.{v}"
+            if keep(full, ALLOWED):
+                all_core_variables_filtered.add(full)
+    for ent, shorts in (rep.get("repeteables") or {}).items():
+        for v in shorts:
+            full = f"{ent}.{v}"
+            if keep(full, ALLOWED):
+                all_core_variables_filtered.add(full)
+
+    # variables actually present in the input
+    vars_in_data = set(df_long_all["core_variable"].astype(str).unique())
+    candidate_vars = all_core_variables_filtered & vars_in_data
+
+    # patient ids
+    patient_ids = sorted(df_long_all["patient_id"].astype(str).unique())
+    if not candidate_vars or not patient_ids:
+        return pd.DataFrame(columns=["Variable", "Importance", "First phase", *patient_ids, "MissingPercent"])
+
+    # --- Importance mapping ---------------------------------------------------------
+    def _norm(txt: str) -> str:
+        return "".join(ch.lower() for ch in str(txt) if str(ch).isalnum())
+
+    importance_map = {}
+    try:
+        with open(variable_importance_file, encoding="utf-8") as fh:
+            raw_map = json.load(fh)
+        importance_map = {_norm(k.replace(".", "_"))                          : v for k, v in raw_map.items()}
+    except Exception:
+        importance_map = {}
+
+    def importance_of(col: str) -> str:
+        full = _norm(col.replace(".", "_"))
+        lab = importance_map.get(full)
+        if lab:
+            return {"M": "High", "R": "Medium", "O": "Low"}.get(lab, lab)
+        short = col.split(".", 1)[-1]
+        lab = importance_map.get(_norm(short), "Unknown")
+        return {"M": "High", "R": "Medium", "O": "Low"}.get(lab, lab)
+
+    # --- Phase tagging (First phase) ----------------------------------------------
+    def to_ts(val):
+        try:
+            return pd.to_datetime(val, errors="coerce")
+        except Exception:
+            return pd.NaT
+
+    # EpisodeEvent date lookup and earliest diagnosis per patient
+    epi_date_lookup = (
+        df_long_all[df_long_all.core_variable == "EpisodeEvent.dateOfEpisode"]
+        .set_index(["patient_id", "record_id"])["value"]
+        .to_dict()
+    )
+    diag_lookup = (
+        df_long_all[df_long_all.core_variable == "Diagnosis.dateOfDiagnosis"]
+        .sort_values("value")
+        .drop_duplicates("patient_id")
+        .set_index("patient_id")["value"]
+        .to_dict()
+    )
+
+    phase_events = []
+    for _, r in df_long_all.iterrows():
+        try:
+            if r.core_variable == "EpisodeEvent.diseaseStatus":
+                code = str(r.value).strip()
+                if code == "32949":
+                    phase = "Progression"
+                elif code == "2000100002":
+                    phase = "Recurrence"
+                else:
+                    phase = "Diagnosis"
+                dt_raw = epi_date_lookup.get(
+                    (r.patient_id, r.record_id)) or diag_lookup.get(r.patient_id)
+                phase_events.append((r.patient_id, phase, to_ts(dt_raw)))
+            elif r.core_variable == "Diagnosis.dateOfDiagnosis":
+                phase_events.append(
+                    (r.patient_id, "Diagnosis", to_ts(r.value)))
+        except Exception:
+            continue
+
+    phase_df = pd.DataFrame(phase_events, columns=[
+                            "pid", "phase", "date"]).dropna()
+    if not phase_df.empty:
+        phase_df = phase_df.sort_values("date").drop_duplicates(
+            subset=["pid", "phase"], keep="first")
+
+    record_dates = (
+        df_long_all.assign(date=df_long_all.apply(
+            lambda r: to_ts(r.value) if "date" in str(r.core_variable).lower() else pd.NaT, axis=1))
+        .groupby(["patient_id", "record_id"])["date"]
+        .min()
+        .reset_index()
+    )
+
+    def closest_phase(row):
+        pid, dt = row.patient_id, row.date
+        if pd.isna(dt) or phase_df.empty:
+            return "Diagnosis"
+        cand = phase_df[(phase_df.pid == pid) & (phase_df.date <= dt)]
+        if cand.empty:
+            return "Diagnosis"
+        idx = (dt - cand.date).idxmin()
+        return cand.loc[idx, "phase"]
+
+    df_with_phase = df_long_all.merge(
+        record_dates.assign(phase=record_dates.apply(closest_phase, axis=1))[
+            ["patient_id", "record_id", "phase"]],
+        on=["patient_id", "record_id"],
+        how="left",
+    )
+    # last phase per variable across timeline
+    last_phase_per_var = {}
+    try:
+        lasts = df_with_phase.sort_values("date").drop_duplicates(
+            subset=["patient_id", "record_id", "core_variable"], keep="last"
+        )
+        last_phase_per_var = dict(
+            zip(lasts["core_variable"].astype(str), lasts["phase"].astype(str)))
+    except Exception:
+        last_phase_per_var = {}
+
+    # --- Instances per (patient, entity) -----------------------------------------
+    ent_total_inst = (
+        df_long_all
+        .assign(entity=lambda d: d["core_variable"].astype(str).str.split(".", n=1).str[0])
+        .groupby(["patient_id", "entity"])["record_id"]
+        .nunique(dropna=False)
+        .to_dict()
+    )
+
+    # --- Build matrix --------------------------------------------------------------
+    def _cell_for(var: str, pid: str) -> tuple[str, int]:
+        ent = var.split(".", 1)[0]
+        total_inst = int(ent_total_inst.get((pid, ent), 0))
+        # count instances where this var has a non-empty value
+        sub = df_long_all[(df_long_all["patient_id"] == pid)
+                          & (df_long_all["core_variable"] == var)]
+        filled_inst = 0
+        if not sub.empty:
+            try:
+                # count unique record_ids with non-empty values
+                tmp = sub.assign(val=sub["value"].astype(str).str.strip())
+                mask = tmp["value"].notna() & tmp["val"].ne("")
+                filled_inst = tmp.loc[mask, "record_id"].nunique(dropna=False)
+            except Exception:
+                filled_inst = 0
+
+        missing_inst = max(0, total_inst - filled_inst)
+
+        if total_inst == 0 and entity_min_card.get(ent, 1) == 0:
+            return "Not present", 0
+        if filled_inst == 0 and total_inst > 0:
+            return "Missing", 1
+        if total_inst > 1 and filled_inst < total_inst:
+            return "Sometimes", 0
+        return "", 0
+
+    # custom ordering (entity then variable order from config)
+    CROSSTAB_ENTITY_REPORT_ORDER = [
+        "Patient", "CancerEpisode", "Diagnosis", "ClinicalStage", "PathologicalStage",
+        "EpisodeEvent", "DiseaseExtent", "Surgery", "Radiotherapy", "SystemicTreatment",
+        "OverallTreatmentResponse", "PatientFollowUp",
+    ]
+    _BIG = 10_000_000
+    entity_rank = {e: i for i, e in enumerate(CROSSTAB_ENTITY_REPORT_ORDER)}
+    var_rank = {}
+    try:
+        for ent, short_list in (rep.get("non_repeteables") or {}).items():
+            for j, short in enumerate(short_list):
+                var_rank[f"{ent}.{short}"] = j
+        for ent, short_list in (rep.get("repeteables") or {}).items():
+            for j, short in enumerate(short_list):
+                var_rank[f"{ent}.{short}"] = j
+    except Exception:
+        pass
+
+    def _var_sort_key(v: str):
+        ent = v.split(".", 1)[0]
+        return (entity_rank.get(ent, _BIG), var_rank.get(v, _BIG), v)
+
+    variables = sorted(candidate_vars, key=_var_sort_key)
+
+    rows = []
+    for var in variables:
+        ent = var.split(".", 1)[0]
+        importance = importance_of(var)
+        # prefer latest seen; empty if unknown
+        first_phase = last_phase_per_var.get(var, "")
+
+        row = {"Variable": var, "Importance": importance,
+               "First phase": first_phase}
+        miss_cnt = 0
+        for pid in patient_ids:
+            cell, is_miss = _cell_for(var, pid)
+            if is_miss:
+                miss_cnt += 1
+            row[pid] = cell
+        row["MissingPercent"] = round(
+            miss_cnt / len(patient_ids) * 100, 2) if patient_ids else 0.0
+        rows.append(row)
+
+    df_matrix = pd.DataFrame(rows, columns=[
+                             "Variable", "Importance", "First phase", *patient_ids, "MissingPercent"])
+
+    # Per-patient % row
+    pat_row = {"Variable": "MissingPercentPerPatient",
+               "Importance": "", "First phase": ""}
+    for pid in patient_ids:
+        pct = (df_matrix[pid] == "Missing").sum() / \
+            len(variables) * 100 if variables else 0.0
+        pat_row[pid] = round(pct, 2)
+    df_matrix = pd.concat(
+        [df_matrix, pd.DataFrame([pat_row])], ignore_index=True)
+
+    # Combined “Total [Importance] at [phase]” rows
+    combined_rows = []
+    ORDER = {"Diagnosis": 0, "Progression": 1, "Recurrence": 2}
+    # patients with any dated record per phase (best-effort)
+    pats_by_phase = {}
+    try:
+        pats_by_phase = {
+            ph: set(df_with_phase.loc[df_with_phase["phase"]
+                    == ph, "patient_id"].astype(str).unique())
+            for ph in ["Diagnosis", "Progression", "Recurrence"]
+        }
+    except Exception:
+        pats_by_phase = {k: set()
+                         for k in ["Diagnosis", "Progression", "Recurrence"]}
+
+    def _importance_label(v: str) -> str:
+        return importance_of(v)
+
+    for importance in ["High", "Medium", "Low"]:
+        phase_vars = [
+            v for v in variables if _importance_label(v) == importance]
+        for phase in ["Diagnosis", "Progression", "Recurrence"]:
+            summary = {"Variable": f"Total {importance} at {phase.lower()}",
+                       "Importance": importance, "First phase": ""}
+            for pid in patient_ids:
+                if pid in pats_by_phase.get(phase, set()):
+                    total_count = len(phase_vars)
+                    missing_count = 0
+                    for v in phase_vars:
+                        # reuse computed df_matrix cells
+                        cell = df_matrix.loc[df_matrix["Variable"] == v, pid]
+                        val = cell.iloc[0] if len(cell) > 0 else ""
+                        if val in ["Missing", "Sometimes"]:
+                            missing_count += 1
+                    summary[pid] = str(
+                        round((missing_count / total_count) * 100, 2) if total_count else 0.0)
+                else:
+                    summary[pid] = "0.0"
+            summary["MissingPercent"] = str(round(sum(float(
+                summary[pid]) for pid in patient_ids) / len(patient_ids), 2)) if patient_ids else "0.0"
+            combined_rows.append(summary)
+
+    if combined_rows:
+        df_matrix = pd.concat(
+            [df_matrix, pd.DataFrame(combined_rows)], ignore_index=True)
+
+    # Column order: First phase before MissingPercent
+    if {"Variable", "Importance", "MissingPercent"}.issubset(df_matrix.columns):
+        other_cols = [c for c in df_matrix.columns if c not in (
+            "Variable", "Importance", "First phase", "MissingPercent")]
+        df_matrix = df_matrix[["Variable", "Importance",
+                               "First phase", "MissingPercent", *other_cols]]
+
+    # Row order: put summary rows at the top
+    summary_order = [
+        "MissingPercentPerPatient",
+        "Total High at diagnosis", "Total High at progression", "Total High at recurrence",
+        "Total Medium at diagnosis", "Total Medium at progression", "Total Medium at recurrence",
+        "Total Low at diagnosis", "Total Low at progression", "Total Low at recurrence",
+    ]
+    order_map = {name: i for i, name in enumerate(summary_order)}
+    df_matrix["__orig_idx"] = range(len(df_matrix))
+    df_matrix["__order"] = df_matrix["Variable"].map(
+        order_map).fillna(len(summary_order)).astype(int)
+    df_matrix = (
+        df_matrix.sort_values(["__order", "__orig_idx"])
+        .drop(columns=["__order", "__orig_idx"])
+        .reset_index(drop=True)
+    )
+    return df_matrix
+
+
+def crosstab_external_user(datafile, disease_type, output_csv_path):
+    """
+    Writes a semicolon-delimited CSV with only:
+    Variable;Importance;First phase;MissingPercent
+    """
+    dfm = build_missing_matrix_from_long_data(datafile, disease_type)
+    # dfm = df_matrix.copy()
+    cols_to_keep = [c for c in ["Variable", "Importance",
+                                "First phase", "MissingPercent"] if c in dfm.columns]
+    reduced = dfm[cols_to_keep].copy()
+    if "MissingPercent" in reduced.columns:
+        reduced["MissingPercent"] = pd.to_numeric(
+            reduced["MissingPercent"], errors="coerce")
+
+    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
+    with open(output_csv_path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh, delimiter=";")
+        w.writerow(cols_to_keep)
+        for _, r in reduced.iterrows():
+            row_vals = [("" if pd.isna(r[col]) else str(r[col]))
+                        for col in cols_to_keep]
+            w.writerow(row_vals)
+    print(f"Wrote external crosstab to: {output_csv_path}")

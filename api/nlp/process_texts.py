@@ -1044,21 +1044,21 @@ if __name__ == "__main__":
     prompt_types = list(prompts_config.keys())
     print(f"[INFO] Found {len(prompt_types)} prompt types: {prompt_types}")
 
-    # fewshots_dict = {pt: [] for pt in prompt_types}
+    fewshots_dict = {pt: [] for pt in prompt_types}
 
-    # llm_results = process_texts_with_llm(
-    #     texts=texts_df,
-    #     model_path="nlp/meta-llama-3.1-8b-instruct-q4_k_m.gguf",
-    #     prompts_json_path=prompts_json_path,
-    #     fewshots_dict=fewshots_dict,
-    #     parse_multiple_values=True,
-    #     task_id="task_id",
-    #     is_cancelled_callback=None
-    # )
-    # # write to processed texts path for inspection
-    # llm_results.to_csv(processed_texts_path, index=False)
-    # print(f"[INFO] LLM results saved to {processed_texts_path}")
-    # exit(0)  # Prevent running the full processing below for now
+    llm_results = process_texts_with_llm(
+        texts=texts_df,
+        model_path="nlp/meta-llama-3.1-8b-instruct-q4_k_m.gguf",
+        prompts_json_path=prompts_json_path,
+        fewshots_dict=fewshots_dict,
+        parse_multiple_values=True,
+        task_id="task_id",
+        is_cancelled_callback=None
+    )
+    # write to processed texts path for inspection
+    llm_results.to_csv(processed_texts_path, index=False)
+    print(f"[INFO] LLM results saved to {processed_texts_path}")
+    exit(0)  # Prevent running the full processing below for now
 
     # Load structured data CSV
     try:

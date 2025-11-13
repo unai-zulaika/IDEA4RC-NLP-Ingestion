@@ -5,15 +5,16 @@ import sqlite3
 import uuid
 import tempfile
 from sqlalchemy import create_engine
-
+import functools
 import pandas as pd
 import numpy as np
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from link_service.linking_service import link_rows
 from nlp.process_texts import process_texts
-from quality_checks.quality_check import quality_check
+from quality_checks.quality_check import quality_check, crosstab_external_user
+from quality_checks.fill_metadata import run_fill_metadata
 import os
 import json
 import datetime as _dt
@@ -25,6 +26,8 @@ import queue as _queue
 import traceback
 import psutil
 import mimetypes
+import csv
+from pathlib import Path
 
 # Keep status/logs separate from large result tables to avoid locks
 STATUS_DB = "pipeline_status.db"
@@ -55,7 +58,7 @@ PROCESS_PIDS: Dict[str, tuple[int, mp.Process]] = {}
 
 
 def create_cancel_event(task_id: str):
-    CANCEL_EVENTS[task_id] = asyncio.Event()    
+    CANCEL_EVENTS[task_id] = asyncio.Event()
 
 
 def request_cancel(task_id: str) -> bool:
@@ -287,15 +290,36 @@ async def run_quality_check_task(task_id: str, data_file: bytes, disease_type: s
 
 def _read_uploaded_file(file_bytes: bytes) -> pd.DataFrame:
     """
-    Read uploaded file (Excel or CSV) into a DataFrame.
-    Tries Excel first, falls back to CSV if that fails.
+    Robustly load uploaded bytes as DataFrame:
+    - If XLSX magic header (PK), read as Excel
+    - Else read as CSV with delimiter sniffing and python engine
     """
+    buf = io.BytesIO(file_bytes)
+
+    # 1) XLSX detection by ZIP magic header
     try:
-        # Try Excel first
-        return pd.read_excel(io.BytesIO(file_bytes))
+        if file_bytes[:2] == b"PK":
+            return pd.read_excel(buf, engine="openpyxl", dtype=str)
     except Exception:
-        # Fall back to CSV
-        return pd.read_csv(io.BytesIO(file_bytes))
+        # fall through to CSV logic
+        pass
+
+    # 2) CSV with delimiter sniffing
+    try:
+        # Let pandas detect delimiter using python engine
+        buf.seek(0)
+        return pd.read_csv(buf, sep=None, engine="python", dtype=str)
+    except Exception:
+        # Manual sniff as fallback
+        try:
+            sample = file_bytes[:4096].decode("utf-8", errors="ignore")
+            dialect = csv.Sniffer().sniff(
+                sample, delimiters=[",", ";", "\t", "|"])
+            buf.seek(0)
+            return pd.read_csv(buf, delimiter=dialect.delimiter, engine="python", dtype=str)
+        except Exception as e:
+            raise ValueError(
+                f"Unable to parse uploaded file as Excel or CSV: {e}")
 
 
 @app.post("/run/quality_check")
@@ -306,6 +330,8 @@ async def quality_check_call(
 ):
     task_id = str(uuid.uuid4())
     create_cancel_event(task_id)
+    # NEW: create an initial status row so /status works immediately
+    update_status(task_id, "Queued", 0, None)
     data_content = await file.read()
 
     # Start the task in the background
@@ -318,42 +344,101 @@ async def quality_check_call(
     }
 
 
-@app.get("/results/{task_id}/{step_name}")
-def get_step_results_as_csv(task_id: str, step_name: str):
-    """
-    Fetch pipeline step data from the database and return as a CSV file.
-    """
-    conn = None
+@app.post("/run/discoverability")
+async def discoverability_call(
+    file: UploadFile = File(...),
+):
+    # 1) Allocate task id and CREATE INITIAL STATUS ROW
+    task_id = str(uuid.uuid4())
+    # queued row so /status/{task_id} won’t 404
+    update_status(task_id, "Queued", 0, None)
+    create_cancel_event(task_id)
+
+    # 2) Read upload bytes (fast) and start worker in the background
+    payload = await file.read()
+
+    async def _worker():
+        try:
+            await run_discoverability_task(task_id, payload)
+        finally:
+            CANCEL_EVENTS.pop(task_id, None)
+
+    # fire-and-forget background task
+    asyncio.create_task(_worker())
+
+    # 3) Return immediately
+    return {
+        "task_id": task_id,
+        "message": "discoverability started – poll /status/{task_id} for progress.",
+    }
+
+
+@app.get("/status/{task_id}")
+def get_status(task_id: str):
+    row = get_status_from_db(task_id)
+    if not row:
+        # Graceful default while background task starts
+        return {"task_id": task_id, "step": "Queued", "progress": 0, "result": None, "is_running": True}
+    return row
+
+
+async def run_discoverability_task(task_id: str, data_bytes: bytes):
     try:
-        conn = sqlite3.connect(RESULTS_DB, timeout=5)
-        conn.execute("PRAGMA busy_timeout=5000;")
-        query = f'SELECT * FROM "{task_id}_{step_name}"'
-        df: pd.DataFrame = pd.read_sql(query, conn)  # type: ignore
-
-        if df.empty:
-            raise HTTPException(
-                status_code=404, detail="No data found for the specified task and step."
-            )
-
-        # Write the DataFrame to CSV in memory
-        csv_data = io.BytesIO()
-        df.to_csv(csv_data, index=False, encoding='utf-8')
-        csv_data.seek(0)
-
-        # Return the CSV file as a streaming response
-        return StreamingResponse(
-            csv_data,
-            media_type="text/csv",
-            headers={
-
-                "Content-Disposition": f'attachment; filename="{task_id}_{step_name}.csv"'
-            },
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        update_status(task_id, "Initializing", 5)
+        df: pd.DataFrame = await asyncio.to_thread(_read_uploaded_file, data_bytes)
+        update_status(task_id, "Computing discoverability", 70)
+        out_file_json_path: str = await asyncio.to_thread(run_fill_metadata, df)
+        # Store file path directly (NOT a table name)
+        update_status(task_id, "Completed", 100, out_file_json_path)
+    except Exception as exc:
+        update_status(task_id, "Failed", 100, str(exc))
+        raise
     finally:
-        if conn is not None:
-            conn.close()
+        CANCEL_EVENTS.pop(task_id, None)
+
+
+@app.post("/run/discoverability")
+async def discoverability_call(file: UploadFile = File(...)):
+    task_id = str(uuid.uuid4())
+    # Create initial status row so /status polling works immediately
+    update_status(task_id, "Queued", 0, None)
+    create_cancel_event(task_id)
+    payload = await file.read()
+
+    async def _worker():
+        await run_discoverability_task(task_id, payload)
+
+    asyncio.create_task(_worker())
+    return {"task_id": task_id, "message": "discoverability started"}
+
+
+@app.get("/results/{task_id}/discoverability_json")
+def get_discoverability_json(task_id: str):
+    status = get_status_from_db(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Task ID not found")
+    step = status.get("step")
+    if step != "Completed":
+        raise HTTPException(
+            status_code=409, detail=f"Task not completed (step={step})")
+    path = status.get("result")
+    if not path:
+        raise HTTPException(status_code=404, detail="No result path stored")
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=404, detail=f"Result file not found: {path}")
+
+    def _iterfile():
+        with open(path, "rb") as f:
+            while chunk := f.read(8192):
+                yield chunk
+
+    return StreamingResponse(
+        _iterfile(),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{os.path.basename(path)}"'},
+    )
 
 
 async def run_link_rows_task(task_id: str, data_file: bytes, disease_type: str = "sarcoma"):
@@ -376,7 +461,7 @@ async def run_link_rows_task(task_id: str, data_file: bytes, disease_type: str =
 
         update_status(task_id, "Linking rows", 60)
         task_logger.info("Invoking link_rows() in isolated process.")
-        linked_df: pd.DataFrame = await asyncio.to_thread(_run_in_subprocess, task_id, link_rows, df, disease_type)
+        linked_df: pd.DataFrame = await asyncio.to_thread(_run_in_subprocess, task_id, link_rows, df)
         task_logger.info("link_rows complete (shape=%s).", linked_df.shape)
         check_cancelled_or_raise(task_id)
 
@@ -409,6 +494,8 @@ async def link_rows_call(
     """
     task_id = str(uuid.uuid4())
     create_cancel_event(task_id)
+    # NEW: initial status
+    update_status(task_id, "Queued", 0, None)
     data_content = await file.read()
 
     background_tasks.add_task(
@@ -436,19 +523,29 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes, di
         free_texts: pd.DataFrame = await asyncio.to_thread(_read_uploaded_file, text_file)
         check_cancelled_or_raise(task_id)
 
-        update_status(task_id, "Processing free texts", 30)
-        task_logger.info(
-            "Processing free texts and structuring data in isolated process.")
-        # Use top-level wrapper instead of a local function (picklable under spawn)
-        # Create a wrapper that includes disease_type
-
         def _call_process_texts_with_disease(ft, ex):
             return _call_process_texts(ft, ex, disease_type)
 
-        process_result = await asyncio.to_thread(
-            _run_in_subprocess, task_id, _call_process_texts_with_disease, free_texts, excel_data
-        )
+        # update_status(task_id, "Processing free texts", 30)
+        # task_logger.info(
+        #     "Processing free texts and structuring data in isolated process.")
+        # # Use top-level wrapper instead of a local function (picklable under spawn)
+        # # Create a wrapper that includes disease_type
 
+        # process_result = await asyncio.to_thread(
+        #     _run_in_subprocess, task_id, _call_process_texts_with_disease, free_texts, excel_data
+        # )
+
+        update_status(task_id, "Processing free texts", 30)
+        task_logger.info(
+            "Processing free texts and structuring data in isolated process.")
+
+        # NEW: bind disease_type so the function is picklable and carries the selection
+        process_with_disease = functools.partial(
+            _call_process_texts, disease_type=disease_type)
+        process_result = await asyncio.to_thread(
+            _run_in_subprocess, task_id, process_with_disease, free_texts, excel_data
+        )
         # Unpack the result (excel_data, llm_results)
         if isinstance(process_result, tuple) and len(process_result) == 2:
             structured_data, llm_results = process_result
@@ -466,7 +563,7 @@ async def run_pipeline_task(task_id: str, data_file: bytes, text_file: bytes, di
 
         update_status(task_id, "Linking rows", 60)
         task_logger.info("Linking rows based on criteria in isolated process.")
-        linked_data = await asyncio.to_thread(_run_in_subprocess, task_id, link_rows, structured_data, disease_type)
+        linked_data = await asyncio.to_thread(_run_in_subprocess, task_id, link_rows, structured_data)
         await asyncio.to_thread(store_step_output, task_id, "linked_data", linked_data)
         check_cancelled_or_raise(task_id)
 
@@ -501,6 +598,8 @@ async def start_pipeline(
     """Starts the pipeline - accepts Excel or CSV files"""
     task_id = str(uuid.uuid4())
     create_cancel_event(task_id)
+    # NEW: initial status
+    update_status(task_id, "Queued", 0, None)
     data_content = await data_file.read()
     text_content = await text_file.read()
 
@@ -515,15 +614,12 @@ async def start_pipeline(
 
 
 @app.get("/status/{task_id}")
-async def get_status(task_id: str):
-    """Provides the status of a task given its id"""
-    status = get_status_from_db(task_id)
-    if not status:
-        raise HTTPException(status_code=404, detail="Task ID not found.")
-    # Always return a quick, non-blocking status with running flag
-    is_running = status["step"] not in ("Completed", "Failed") and (
-        status["progress"] is None or status["progress"] < 100)
-    return {**status, "is_running": bool(is_running)}
+def get_status(task_id: str):
+    row = get_status_from_db(task_id)
+    if not row:
+        # Graceful default while background task starts
+        return {"task_id": task_id, "step": "Queued", "progress": 0, "result": None, "is_running": True}
+    return row
 
 
 @app.get("/logs/{task_id}")
@@ -664,8 +760,8 @@ def _call_process_texts(ft: pd.DataFrame, ex: pd.DataFrame, disease_type: str = 
             return (result, None)
     except TypeError:
         # Legacy signature fallback
-        result = process_texts(ft, ex, None, None, None,
-                               disease_type=disease_type)
+        result = process_texts(ft, ex, None, None, None)
+        # disease_type=disease_type)
         if isinstance(result, tuple):
             return result
         else:
@@ -842,3 +938,130 @@ def force_kill_task(task_id: str):
     update_status(task_id, "Cancelled", 100,
                   "Force-killed by user" if killed else "Kill requested")
     return {"ok": bool(killed), "message": "Force kill sent."}
+
+
+# NEW: discoverability task
+
+
+async def run_discoverability_task(task_id: str, data_file: bytes):
+    """
+    Background job: run fill_metadata on the uploaded file and store output path in status.result.
+    """
+    task_logger = get_task_logger(task_id)
+    try:
+        # status row must exist already
+        update_status(task_id, "Initializing", 5)
+        task_logger.info("Discoverability task initialized.")
+
+        # Parse file off the event loop
+        update_status(task_id, "Loading data", 10)
+        df: pd.DataFrame = await asyncio.to_thread(_read_uploaded_file, data_file)
+        task_logger.info("File read into DataFrame (shape=%s).", df.shape)
+
+        update_status(task_id, "Computing discoverability", 70)
+        out_file_json_path: str = await asyncio.to_thread(run_fill_metadata, df)
+
+        update_status(task_id, "Completed", 100, out_file_json_path)
+        task_logger.info(
+            "Discoverability completed. Output: %s", out_file_json_path)
+    except Exception as exc:
+        # Ensure a failure status is written even if not present
+        try:
+            update_status(task_id, "Failed", 100, str(exc))
+        except Exception:
+            pass
+        task_logger.error("Discoverability task failed: %s", exc)
+        raise
+
+
+@app.post("/run/discoverability")
+async def discoverability_call(
+    file: UploadFile = File(...),
+):
+    # 1) Allocate task id and CREATE INITIAL STATUS ROW
+    task_id = str(uuid.uuid4())
+    # queued row so /status/{task_id} won’t 404
+    update_status(task_id, "Queued", 0, None)
+    create_cancel_event(task_id)
+
+    # 2) Read upload bytes (fast) and start worker in the background
+    payload = await file.read()
+
+    async def _worker():
+        try:
+            await run_discoverability_task(task_id, payload)
+        finally:
+            CANCEL_EVENTS.pop(task_id, None)
+
+    # fire-and-forget background task
+    asyncio.create_task(_worker())
+
+    # 3) Return immediately
+    return {
+        "task_id": task_id,
+        "message": "discoverability started – poll /status/{task_id} for progress.",
+    }
+
+
+@app.get("/results/{task_id}/discoverability_json")
+def get_discoverability_json(task_id: str):
+    """
+    Stream the filled metadata JSON for a completed discoverability task.
+    """
+    status = get_status_from_db(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Task ID not found.")
+    if status["step"] != "Completed":
+        raise HTTPException(status_code=409, detail="Task not completed yet.")
+    path = status.get("result")
+    if not path or not os.path.exists(path):
+        raise HTTPException(
+            status_code=404, detail="Discoverability output not found.")
+
+    def _iterfile():
+        with open(path, "rb") as f:
+            while chunk := f.read(8192):
+                yield chunk
+
+    return StreamingResponse(
+        _iterfile(),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{os.path.basename(path)}"'},
+    )
+
+
+# NEW: results download endpoint (missing, used by status_web)
+@app.get("/results/{task_id}/{step_name}")
+def get_step_results_as_csv(task_id: str, step_name: str):
+    """
+    Fetch pipeline step data from the results database and return as a CSV file.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(RESULTS_DB, timeout=5)
+        conn.execute("PRAGMA busy_timeout=5000;")
+        query = f'SELECT * FROM "{task_id}_{step_name}"'
+        df: pd.DataFrame = pd.read_sql(query, conn)  # type: ignore
+
+        if df.empty:
+            raise HTTPException(
+                status_code=404, detail="No data found for the specified task and step."
+            )
+
+        csv_data = io.BytesIO()
+        df.to_csv(csv_data, index=False, encoding="utf-8")
+        csv_data.seek(0)
+
+        return StreamingResponse(
+            csv_data,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{task_id}_{step_name}.csv"'
+            },
+        )
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Not Found") from e
+    finally:
+        if conn is not None:
+            conn.close()

@@ -1,3 +1,5 @@
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 import streamlit as st
 import requests
 import time
@@ -440,6 +442,70 @@ if etl_btn:
         st.error(f"Error: {response.json().get('detail', 'Unknown error')}")
 
 
+# option 5: run discoverability
+st.divider()
+st.title("_OPTION 5_ :blue[Run Discoverability]")
+st.write("### Run Discoverability on a File")
+uploaded_discoverability_file = st.file_uploader(
+    "Upload a file to run discoverability (Excel or CSV)", type=["xlsx", "csv"], key="discoverability_file_uploader"
+)
+discoverability_btn = st.button(
+    "Execute Discoverability",
+    key="btn_discoverability",
+    disabled=uploaded_discoverability_file is None,
+)
+if discoverability_btn:
+    discoverability_mime = "text/csv" if uploaded_discoverability_file.name.endswith(
+        '.csv') else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    files = {
+        "file": (
+            uploaded_discoverability_file.name,
+            uploaded_discoverability_file.getvalue(),
+            discoverability_mime,
+        )
+    }
+    resp = requests.post(_api("/run/discoverability"), files=files, timeout=10)
+    if resp.status_code != 200:
+        st.error(resp.text)
+        st.stop()
+
+    task_id = resp.json()["task_id"]
+    bar = st.progress(0, text="Starting…")
+
+    step = "Starting"
+    progress = 0
+    while step not in ("Completed", "Failed", "Cancelled"):
+        time.sleep(1)
+        try:
+            st.write("")  # keep UI responsive
+            r = requests.get(_api(f"/status/{task_id}"), timeout=5)
+            if r.status_code != 200:
+                # status row may not exist yet; keep waiting
+                bar.progress(progress, text=step)
+                continue
+            status = r.json()
+            step = status.get("step", step)
+            progress = int(status.get("progress", progress or 0) or 0)
+            bar.progress(progress, text=step)
+        except requests.exceptions.RequestException:
+            # transient network error; keep waiting
+            bar.progress(progress, text=step)
+
+    bar.empty()
+    if step == "Completed":
+        r = requests.get(
+            _api(f"/results/{task_id}/discoverability_json"), timeout=30)
+        if r.status_code == 200:
+            st.success("Discoverability completed.")
+            st.download_button("Download discoverability JSON", r.content,
+                               file_name=f"{task_id}_discoverability.json",
+                               mime="application/json")
+        else:
+            st.error(f"Finished but cannot fetch JSON: {r.text}")
+    elif step == "Failed":
+        st.error("Discoverability failed. See logs.")
+    else:
+        st.warning(f"Task ended with state: {step}")
 # PIPELINE STATUS
 st.divider()
 
@@ -573,3 +639,6 @@ if st.button("Fetch Logs"):
             st.error(f"Logs fetch failed. Backend {mode} not reachable: {e}")
     else:
         st.warning("Please enter a valid Task ID.")
+
+
+# Streamlit frontend only; no FastAPI server here
