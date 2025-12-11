@@ -102,7 +102,7 @@ def _pick_n_gpu_layers(model_layers: int = 32) -> int:
 
 
 def init_model(model_path: str,
-               n_ctx: int = 4096,
+               n_ctx: int = 8192,  # Increased from 4096 to use more VRAM and handle longer prompts
                model_layers: int = 32) -> None:
     """
     Initialize a global Llama() instance once (keep it hot).
@@ -119,15 +119,56 @@ def init_model(model_path: str,
         try:
             print(
                 f"[llama.cpp] init n_gpu_layers={n_gpu_layers}, n_threads={n_threads}")
-            _LLM = Llama(
-                model_path=model_path,
-                n_ctx=n_ctx,
-                n_threads=n_threads,
-                n_batch=512,
-                n_gpu_layers=n_gpu_layers,   # -1: all, 0: CPU
-                verbose=False,
-            )
+            
+            # Try with flash_attn first (better VRAM efficiency), fallback without if not supported
+            try_flash_attn = True
+            llama_params = {
+                "model_path": model_path,
+                "n_ctx": n_ctx,
+                "n_threads": n_threads,
+                # n_batch: Number of tokens processed in parallel during PROMPT EVALUATION phase
+                # - During prompt processing (before generation), tokens are batched for efficiency
+                # - Higher n_batch = more tokens processed at once = faster prompt evaluation = more VRAM
+                # - Does NOT batch multiple prompts together (still sequential)
+                # - Example: If prompt has 500 tokens, with n_batch=1024, all 500 are processed in one batch
+                # - If prompt has 2000 tokens, with n_batch=1024, it processes in 2 batches (1024 + 976)
+                "n_batch": 1024,  # Increased from 512 to better utilize VRAM for prompt processing
+                "n_gpu_layers": n_gpu_layers,   # -1: all, 0: CPU
+                "verbose": False,
+                # n_ubatch: Unbatch size for attention computation (parallelization within attention)
+                # - Controls how many tokens attend to each other in parallel
+                # - Lower = less VRAM, higher = more parallelization (if VRAM allows)
+                "n_ubatch": 512,  # Unbatch size for attention (can help with memory efficiency)
+            }
+            
+            # Try with flash_attn if GPU layers > 0
+            if n_gpu_layers > 0:
+                try:
+                    llama_params["flash_attn"] = True
+                    _LLM = Llama(**llama_params)
+                    print("[llama.cpp] Initialized with flash_attn=True (optimized VRAM usage)")
+                except Exception as e:
+                    # Flash attention not supported, try without
+                    print(f"[llama.cpp] flash_attn not available: {e}")
+                    print("[llama.cpp] Falling back to flash_attn=False")
+                    llama_params.pop("flash_attn", None)
+                    _LLM = Llama(**llama_params)
+            else:
+                _LLM = Llama(**llama_params)
             print("[llama.cpp] model ready")
+            
+            # Verify GPU usage by checking memory
+            if n_gpu_layers > 0:
+                try:
+                    if pynvml:
+                        pynvml.nvmlInit()
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                        mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                        print(f"[llama.cpp] GPU memory allocated: {mem_info.used / (1024**3):.2f}GB")
+                        pynvml.nvmlShutdown()
+                except Exception:
+                    pass  # GPU monitoring optional
+            
             return
         except Exception as e:
             print(
