@@ -179,7 +179,7 @@ def init_model(model_path: str,
 
 def run_model_with_prompt(prompt: str,
                           max_new_tokens: int = 128,
-                          temperature: float = 0.7) -> Dict[str, str]:
+                          temperature: float = 0.1) -> Dict[str, str]:
     """
     Run the (already-initialized) LLM on a ready-to-go prompt string.
     Returns {"raw": full_text, "normalized": first_line_after_response}.

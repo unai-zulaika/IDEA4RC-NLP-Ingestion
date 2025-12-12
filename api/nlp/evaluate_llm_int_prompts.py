@@ -21,7 +21,7 @@ from datetime import timedelta
 
 # Import our modules
 from prompt_adapter import adapt_int_prompts
-from fewshot_builder import FewshotBuilder
+from fewshot_builder import FewshotBuilder, map_annotation_to_prompt
 from evaluation_engine import evaluate_annotation, batch_evaluate
 from model_runner import init_model, run_model_with_prompt, get_prompt
 
@@ -44,50 +44,167 @@ def load_adapted_prompts(prompts_json_path: str | Path):
     print(f"[INFO] Loaded {len(adapted_prompts)} adapted prompts into model_runner")
 
 
+def load_annotations_from_json(json_file_path: str | Path) -> Dict[str, Dict[str, str]]:
+    """
+    Load annotations from JSON file and create a lookup dictionary.
+    
+    Args:
+        json_file_path: Path to annotated_patient_notes_with_spans_full_verified.json
+    
+    Returns:
+        Dictionary mapping (note_id, prompt_type) -> annotation text
+    """
+    json_file_path = Path(json_file_path)
+    
+    if not json_file_path.exists():
+        raise FileNotFoundError(f"JSON file not found: {json_file_path}")
+    
+    print(f"[INFO] Loading annotations from JSON: {json_file_path}")
+    
+    with open(json_file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # Create lookup dictionary: note_id -> {'_all_annotations': [list of annotations]}
+    annotations_lookup = {}
+    
+    for patient in data:
+        for note in patient.get('notes', []):
+            note_id = note.get('note_id', '')
+            if not note_id:
+                continue
+            
+            annotations = note.get('annotations', [])
+            
+            # For each annotation, determine which prompt type it matches
+            for annotation in annotations:
+                # Try to match this annotation to a prompt type
+                # We need to check against common prompt types
+                # Since we don't have the prompts loaded yet, we'll match dynamically
+                # Store all annotations for this note, and we'll match them later
+                if note_id not in annotations_lookup:
+                    annotations_lookup[note_id] = {}
+                
+                # Store annotation text - we'll match to prompt_type when needed
+                annotations_lookup[note_id]['_all_annotations'] = annotations
+    
+    print(f"[INFO] Loaded annotations for {len(annotations_lookup)} notes")
+    return annotations_lookup
+
+
+def get_expected_annotation_from_json(
+    annotations_lookup: Dict[str, Dict[str, str]],
+    note_id: str,
+    prompt_type: str
+) -> str:
+    """
+    Get expected annotation for a note-prompt combination from JSON lookup.
+    
+    Args:
+        annotations_lookup: Dictionary from load_annotations_from_json
+        note_id: The note ID
+        prompt_type: The prompt type (e.g., 'gender-int')
+    
+    Returns:
+        Expected annotation text, or empty string if not found
+    """
+    if note_id not in annotations_lookup:
+        return ""
+    
+    note_annotations = annotations_lookup[note_id].get('_all_annotations', [])
+    
+    # Find matching annotation for this prompt type
+    for annotation in note_annotations:
+        if map_annotation_to_prompt(annotation, prompt_type):
+            return annotation
+    
+    return ""
+
+
+def load_report_type_prompt_mapping(mapping_json_path: str | Path | None) -> Dict[str, List[str]]:
+    """
+    Load report type to prompt type mapping from JSON file.
+    
+    Args:
+        mapping_json_path: Path to report_type_prompt_mapping.json, or None to use default
+    
+    Returns:
+        Dictionary mapping report_type -> list of prompt types
+    """
+    script_dir = Path(__file__).resolve().parent
+    
+    if mapping_json_path is None:
+        mapping_json_path = script_dir / "report_type_prompt_mapping.json"
+    else:
+        mapping_json_path = Path(mapping_json_path)
+    
+    if not mapping_json_path.exists():
+        print(f"[WARN] Report type prompt mapping file not found: {mapping_json_path}")
+        print(f"[WARN] Will run all prompts for all report types")
+        return {}
+    
+    print(f"[INFO] Loading report type prompt mapping from: {mapping_json_path}")
+    
+    with open(mapping_json_path, 'r', encoding='utf-8') as f:
+        mapping = json.load(f)
+    
+    print(f"[INFO] Loaded mapping for {len(mapping)} report types")
+    return mapping
+
+
 def main(
     notes_csv_path: str | Path = None,
-    mapping_csv_path: str | Path = None,
+    mapping_csv_path: str | Path = None,  # Deprecated: kept for backward compatibility, not used
     json_file_path: str | Path = None,
     prompts_json_path: str | Path = None,
     model_path: str | Path = None,
     faiss_store_dir: str | Path = "faiss_store",
     fewshot_k: int = 5,
     use_fewshots: bool = True,
-    force_rebuild_faiss: bool = False
+    force_rebuild_faiss: bool = False,
+    report_type_mapping_path: str | Path = None  # Path to report_type_prompt_mapping.json
 ):
     """
     Main evaluation pipeline.
     
     Args:
         notes_csv_path: Path to first_patient_notes.csv
-        mapping_csv_path: Path to first_patient_notes_annotation_mapping.csv
-        json_file_path: Path to annotated_patient_notes.json
+        mapping_csv_path: DEPRECATED - kept for backward compatibility but not used. 
+                         Annotations are now loaded from json_file_path instead.
+        json_file_path: Path to annotated_patient_notes_with_spans_full_verified.json 
+                       (used for both few-shot examples and gold annotations)
         prompts_json_path: Path to FBK_scripts/prompts.json
         model_path: Path to LLM model file
         faiss_store_dir: Directory for FAISS indexes
         fewshot_k: Number of fewshot examples to retrieve (ignored if use_fewshots=False)
         use_fewshots: If False, run without few-shot examples (zero-shot mode)
         force_rebuild_faiss: Force rebuild FAISS indexes even if they exist
+        report_type_mapping_path: Path to report_type_prompt_mapping.json. If None, uses default.
+                                  If mapping is provided, only runs prompts relevant to each note's report_type.
     """
     script_dir = Path(__file__).resolve().parent
     
     # Set default paths
     if notes_csv_path is None:
         notes_csv_path = script_dir / "first_patient_notes.csv"
-    if mapping_csv_path is None:
-        mapping_csv_path = script_dir / "first_patient_notes_annotation_mapping.csv"
     if json_file_path is None:
-        json_file_path = script_dir / "annotated_patient_notes.json"
+        # Default to the new file with spans for better few-shot examples and gold annotations
+        json_file_path = script_dir / "annotated_patient_notes_with_spans_full_verified.json"
+        # Fallback to original file if new one doesn't exist
+        if not Path(json_file_path).exists():
+            json_file_path = script_dir / "annotated_patient_notes.json"
     if prompts_json_path is None:
         prompts_json_path = script_dir / "FBK_scripts" / "prompts.json"
     if model_path is None:
         model_path = script_dir / "meta-llama-3.1-8b-instruct-q4_k_m.gguf"
     
     notes_csv_path = Path(notes_csv_path)
-    mapping_csv_path = Path(mapping_csv_path)
     json_file_path = Path(json_file_path)
     prompts_json_path = Path(prompts_json_path)
     model_path = Path(model_path)
+    
+    # Load report type to prompt mapping (if provided)
+    report_type_mapping = load_report_type_prompt_mapping(report_type_mapping_path)
+    use_report_type_filtering = len(report_type_mapping) > 0
     
     print("=" * 80)
     print("LLM Evaluation Pipeline for INT Prompts")
@@ -96,6 +213,10 @@ def main(
         print(f"Mode: Few-shot (k={fewshot_k})")
     else:
         print("Mode: Zero-shot (no few-shot examples)")
+    if use_report_type_filtering:
+        print(f"Report type filtering: ENABLED ({len(report_type_mapping)} report types mapped)")
+    else:
+        print("Report type filtering: DISABLED (running all prompts for all notes)")
     print("=" * 80)
     
     # Start overall timer
@@ -108,9 +229,9 @@ def main(
     notes_df = pd.read_csv(notes_csv_path, delimiter=';', encoding='utf-8')
     print(f"  Loaded {len(notes_df)} notes")
     
-    print(f"  Loading expected annotations from: {mapping_csv_path}")
-    mapping_df = pd.read_csv(mapping_csv_path, delimiter=';', encoding='utf-8')
-    print(f"  Loaded {len(mapping_df)} note-prompt mappings")
+    print(f"  Loading expected annotations from JSON: {json_file_path}")
+    annotations_lookup = load_annotations_from_json(json_file_path)
+    print(f"  Loaded annotations for {len(annotations_lookup)} notes")
     step_duration = time.time() - step_start
     print(f"  [Time: {step_duration:.2f}s]")
     
@@ -137,7 +258,7 @@ def main(
             builder.build_all_int_prompts(
                 json_file_path,
                 prompts_json_path,
-                patient_indices=[1, 2],
+                patient_indices=[8, 9], # last two indices
                 force_rebuild=force_rebuild_faiss
             )
         else:
@@ -209,7 +330,16 @@ def main(
     print("  This may take a while...")
     
     results = []
-    total_combinations = len(notes_df) * len(prompt_types)
+    # Calculate total combinations (accounting for report type filtering)
+    if use_report_type_filtering:
+        total_combinations = 0
+        for _, note_row in notes_df.iterrows():
+            report_type = note_row['report_type']
+            allowed_prompts = report_type_mapping.get(report_type, prompt_types)
+            total_combinations += len(allowed_prompts)
+    else:
+        total_combinations = len(notes_df) * len(prompt_types)
+    
     current = 0
     note_timings = []  # Track timing per note
     
@@ -226,25 +356,26 @@ def main(
         
         print(f"\n  Processing note: {note_id} ({report_type})")
         
-        # Get expected annotations for this note
-        note_mappings = mapping_df[mapping_df['note_id'] == note_id]
+        # Filter prompts based on report_type if mapping is provided
+        if use_report_type_filtering:
+            allowed_prompts = report_type_mapping.get(report_type, prompt_types)
+            if len(allowed_prompts) < len(prompt_types):
+                print(f"    Filtered prompts: {len(allowed_prompts)}/{len(prompt_types)} prompts relevant to {report_type}")
+        else:
+            allowed_prompts = prompt_types
         
         prompt_timings = []  # Track timing per prompt for this note
         
-        for prompt_type in prompt_types:
+        for prompt_type in allowed_prompts:
             current += 1
             prompt_start_time = time.time()
             
-            # Get expected annotation (if exists)
-            expected_mapping = note_mappings[note_mappings['prompt_type'] == prompt_type]
-            expected_annotation = ""
-            if not expected_mapping.empty:
-                expected_annotation_raw = expected_mapping.iloc[0]['matching_annotation']
-                # Convert to string (handle NaN, None, floats, etc.)
-                if expected_annotation_raw is None or (isinstance(expected_annotation_raw, float) and pd.isna(expected_annotation_raw)):
-                    expected_annotation = ""
-                else:
-                    expected_annotation = str(expected_annotation_raw)
+            # Get expected annotation from JSON lookup
+            expected_annotation = get_expected_annotation_from_json(
+                annotations_lookup,
+                note_id,
+                prompt_type
+            )
             
             print(f"    [{current}/{total_combinations}] {prompt_type}", end=" ... ", flush=True)
             
@@ -283,7 +414,7 @@ def main(
                 output = run_model_with_prompt(
                     prompt=prompt,
                     max_new_tokens=max_new_tokens,  # Reduced for speed
-                    temperature=0.3
+                    temperature=0.1
                 )
                 
                 llm_output = output["normalized"]
@@ -373,14 +504,15 @@ def main(
         
         # Record note-level timing
         note_duration = time.time() - note_start_time
+        num_prompts_for_note = len(allowed_prompts)
         note_timings.append({
             'note_id': note_id,
             'total_time_seconds': round(note_duration, 2),
-            'num_prompts': len(prompt_types),
-            'avg_time_per_prompt_seconds': round(note_duration / len(prompt_types), 3),
+            'num_prompts': num_prompts_for_note,
+            'avg_time_per_prompt_seconds': round(note_duration / num_prompts_for_note, 3) if num_prompts_for_note > 0 else 0,
             'prompt_timings': prompt_timings
         })
-        print(f"  Note {note_id} completed in {note_duration:.2f}s (avg {note_duration/len(prompt_types):.3f}s per prompt)")
+        print(f"  Note {note_id} completed in {note_duration:.2f}s (avg {note_duration/num_prompts_for_note:.3f}s per prompt)")
     
     step_duration = time.time() - step_start
     print(f"\n  [STEP 5 completed in {step_duration:.2f}s]")
@@ -507,12 +639,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mapping-csv",
         type=str,
-        help="Path to first_patient_notes_annotation_mapping.csv"
+        help="DEPRECATED: Annotations are now loaded from --json-file. This argument is kept for backward compatibility but ignored."
     )
     parser.add_argument(
         "--json-file",
         type=str,
-        help="Path to annotated_patient_notes.json"
+        help="Path to annotated_patient_notes_with_spans_full_verified.json (used for both few-shot examples and gold annotations)"
     )
     parser.add_argument(
         "--prompts-json",
@@ -546,6 +678,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Force rebuild FAISS indexes"
     )
+    parser.add_argument(
+        "--report-type-mapping",
+        type=str,
+        help="Path to report_type_prompt_mapping.json. If provided, only runs prompts relevant to each note's report_type."
+    )
     
     args = parser.parse_args()
     
@@ -558,6 +695,7 @@ if __name__ == "__main__":
         faiss_store_dir=args.faiss_dir,
         fewshot_k=args.fewshot_k,
         use_fewshots=not args.no_fewshots,  # Invert: --no-fewshots means use_fewshots=False
-        force_rebuild_faiss=args.force_rebuild_faiss
+        force_rebuild_faiss=args.force_rebuild_faiss,
+        report_type_mapping_path=args.report_type_mapping
     )
 

@@ -1,8 +1,11 @@
 """
 Fewshot Builder for INT Prompts
 
-Extracts patients 2-3 from annotated_patient_notes.json, filters notes by prompt type,
-and builds FAISS indexes for RAG-based fewshot example retrieval.
+Extracts patients 2-3 from annotated_patient_notes.json (or annotated_patient_notes_with_spans_full_verified.json),
+filters notes by prompt type, and builds FAISS indexes for RAG-based fewshot example retrieval.
+
+If annotations_with_spans is available in the JSON, uses only the relevant text spans for each annotation
+instead of the full note text, providing more focused context for few-shot examples.
 """
 
 import json
@@ -130,6 +133,8 @@ class FewshotBuilder:
         """
         Build FAISS index for a specific prompt type from extracted patients.
         
+        Uses text spans from annotations_with_spans if available, otherwise falls back to full note text.
+        
         Args:
             prompt_key: The prompt key (e.g., 'gender-int')
             patients: List of patient dictionaries from JSON
@@ -148,12 +153,32 @@ class FewshotBuilder:
             for note in patient.get('notes', []):
                 note_text = note.get('text', '')
                 annotations = note.get('annotations', [])
+                annotations_with_spans = note.get('annotations_with_spans', [])
                 
                 # Find matching annotations for this prompt type
                 for annotation in annotations:
                     if map_annotation_to_prompt(annotation, prompt_key):
+                        # Try to find corresponding annotation_with_spans
+                        context_text = note_text  # Default to full note text
+                        
+                        if annotations_with_spans:
+                            # Find the matching annotation_with_spans entry
+                            for ann_with_spans in annotations_with_spans:
+                                if ann_with_spans.get('template_text') == annotation:
+                                    # Extract all text spans and combine them
+                                    supporting_spans = ann_with_spans.get('supporting_text_spans', [])
+                                    if supporting_spans:
+                                        # Extract text from each span and join with separator
+                                        span_texts = [span.get('text', '').strip() 
+                                                     for span in supporting_spans 
+                                                     if span.get('text', '').strip()]
+                                        if span_texts:
+                                            # Join spans with " ... " separator for readability
+                                            context_text = " ... ".join(span_texts)
+                                        break  # Found matching annotation, use its spans
+                        
                         examples.append({
-                            'note_original_text': note_text,
+                            'note_original_text': context_text,  # Use span text if available, else full note
                             'annotation': annotation
                         })
                         break  # Only take first matching annotation per note

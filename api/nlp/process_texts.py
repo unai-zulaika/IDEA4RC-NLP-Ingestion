@@ -176,7 +176,7 @@ def process_texts_with_llm(
                 output = run_model_with_prompt(
                     prompt=prompt,
                     max_new_tokens=256,
-                    temperature=0.3
+                    temperature=0.1
                 )
 
                 annotation = output["normalized"]
