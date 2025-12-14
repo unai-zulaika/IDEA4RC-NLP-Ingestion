@@ -24,6 +24,7 @@ from prompt_adapter import adapt_int_prompts
 from fewshot_builder import FewshotBuilder, map_annotation_to_prompt
 from evaluation_engine import evaluate_annotation, batch_evaluate
 from model_runner import init_model, run_model_with_prompt, get_prompt
+from date_evaluation import evaluate_dates
 
 # Import model_runner module to access _PROMPTS
 import model_runner as mr
@@ -120,22 +121,947 @@ def get_expected_annotation_from_json(
     return ""
 
 
+def generate_date_html_report(date_df: pd.DataFrame, date_stats: Dict, output_path: Path) -> None:
+    """
+    Generate an HTML comparison report for date evaluation.
+    
+    Args:
+        date_df: DataFrame with date evaluation results
+        date_stats: Dictionary with date statistics
+        output_path: Path to save HTML file
+    """
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Date Evaluation Comparison Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .stats {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-item {
+            display: inline-block;
+            margin: 10px;
+            padding: 10px 15px;
+            background-color: #ecf0f1;
+            border-radius: 3px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        .fewshot-section {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        .fewshot-header {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .fewshot-example {
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: white;
+            border-radius: 3px;
+            border: 1px solid #dee2e6;
+        }
+        .fewshot-example:last-child {
+            margin-bottom: 0;
+        }
+        .fewshot-example-label {
+            font-weight: bold;
+            color: #495057;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .fewshot-note {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 8px;
+            padding: 5px;
+            background-color: #f8f9fa;
+            border-radius: 2px;
+        }
+        .fewshot-annotation {
+            font-size: 12px;
+            color: #28a745;
+            font-weight: 500;
+            padding: 5px;
+            background-color: #d4edda;
+            border-radius: 2px;
+        }
+        .fewshot-toggle {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            margin-top: 5px;
+        }
+        .fewshot-toggle:hover {
+            background-color: #2980b9;
+        }
+        .fewshot-container {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .filters {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .filters input, .filters select {
+            margin: 5px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .result-card {
+            background-color: white;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .result-card.exact {
+            border-left: 5px solid #27ae60;
+        }
+        .result-card.partial {
+            border-left: 5px solid #f39c12;
+        }
+        .result-card.year {
+            border-left: 5px solid #e67e22;
+        }
+        .result-card.none {
+            border-left: 5px solid #e74c3c;
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .result-id {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .match-badge {
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .match-badge.exact {
+            background-color: #27ae60;
+            color: white;
+        }
+        .match-badge.partial {
+            background-color: #f39c12;
+            color: white;
+        }
+        .match-badge.year {
+            background-color: #e67e22;
+            color: white;
+        }
+        .match-badge.none {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .date-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        .date-column {
+            padding: 10px;
+            border-radius: 3px;
+        }
+        .date-column.expected {
+            background-color: #ecf0f1;
+        }
+        .date-column.predicted {
+            background-color: #e8f5e9;
+        }
+        .column-label {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        .date-list {
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        .date-item {
+            padding: 5px;
+            margin: 3px 0;
+            background-color: white;
+            border-radius: 3px;
+            border-left: 3px solid #3498db;
+        }
+        .date-item.matched {
+            border-left-color: #27ae60;
+            background-color: #d5f4e6;
+        }
+        .metrics {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        .metric {
+            padding: 5px 10px;
+            background-color: #ecf0f1;
+            border-radius: 3px;
+        }
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .no-dates {
+            color: #95a5a6;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Date Evaluation Comparison Report</h1>
+        <p>Comparison of expected vs predicted dates in LLM annotations</p>
+    </div>
+    
+    <div class="stats" id="stats">
+        <div class="stat-item">
+            <div class="stat-value" id="total-count">0</div>
+            <div class="stat-label">Total Evaluations</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="with-dates-count">0</div>
+            <div class="stat-label">With Expected Dates</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="exact-match-count">0</div>
+            <div class="stat-label">Exact Matches</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="accuracy">0%</div>
+            <div class="stat-label">Date Accuracy</div>
+        </div>
+    </div>
+    
+    <div class="filters">
+        <input type="text" id="search-input" placeholder="Search by note_id, p_id, or prompt_type..." style="width: 300px;">
+        <select id="match-filter">
+            <option value="all">All Results</option>
+            <option value="exact">Exact Matches</option>
+            <option value="partial">Partial Matches</option>
+            <option value="year">Year Matches</option>
+            <option value="none">No Match</option>
+        </select>
+        <select id="prompt-filter">
+            <option value="all">All Prompt Types</option>
+        </select>
+    </div>
+    
+    <div id="results-container"></div>
+    
+    <script>
+        const results = """ + date_df.to_json(orient='records', force_ascii=False) + """;
+        const stats = """ + json.dumps(date_stats, ensure_ascii=False) + """;
+        
+        // Populate filters
+        const promptTypes = [...new Set(results.map(r => r.prompt_type))].sort();
+        const promptFilter = document.getElementById('prompt-filter');
+        promptTypes.forEach(pt => {
+            const option = document.createElement('option');
+            option.value = pt;
+            option.textContent = pt;
+            promptFilter.appendChild(option);
+        });
+        
+        function updateStats(filteredResults) {
+            const total = filteredResults.length;
+            const withDates = filteredResults.filter(r => r.expected_count > 0).length;
+            const exactMatches = filteredResults.filter(r => r.date_match_type === 'exact').length;
+            const accuracy = withDates > 0 ? Math.round((exactMatches / withDates) * 100) : 0;
+            
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('with-dates-count').textContent = withDates;
+            document.getElementById('exact-match-count').textContent = exactMatches;
+            document.getElementById('accuracy').textContent = accuracy + '%';
+        }
+        
+        function parseDates(dateStr) {
+            if (!dateStr || dateStr.trim() === '') return [];
+            return dateStr.split(',').map(d => d.trim()).filter(d => d);
+        }
+        
+        function renderResults(filteredResults) {
+            const container = document.getElementById('results-container');
+            container.innerHTML = '';
+            
+            filteredResults.forEach((result, index) => {
+                const card = document.createElement('div');
+                const matchType = result.date_match_type || 'none';
+                card.className = 'result-card ' + matchType;
+                
+                const expectedDates = parseDates(result.expected_dates || '');
+                const predictedDates = parseDates(result.predicted_dates || '');
+                const exactMatchDates = parseDates(result.exact_match_dates || '');
+                
+                // Create date lists
+                const expectedDatesHtml = expectedDates.length > 0 
+                    ? expectedDates.map(d => `<div class="date-item ${exactMatchDates.includes(d) ? 'matched' : ''}">${d}</div>`).join('')
+                    : '<div class="no-dates">No expected dates</div>';
+                
+                const predictedDatesHtml = predictedDates.length > 0
+                    ? predictedDates.map(d => `<div class="date-item ${exactMatchDates.includes(d) ? 'matched' : ''}">${d}</div>`).join('')
+                    : '<div class="no-dates">No predicted dates</div>';
+                
+                const matchTypeLabels = {
+                    'exact': '✓ Exact Match',
+                    'partial': '~ Partial Match',
+                    'year': '≈ Year Match',
+                    'none': '✗ No Match'
+                };
+                
+                card.innerHTML = `
+                    <div class="result-header">
+                        <div class="result-id">
+                            Note: ${result.note_id || 'N/A'} | Patient: ${result.p_id || 'N/A'} | Prompt: ${result.prompt_type || 'N/A'}
+                        </div>
+                        <div class="match-badge ${matchType}">${matchTypeLabels[matchType] || 'Unknown'}</div>
+                    </div>
+                    <div class="date-comparison">
+                        <div class="date-column expected">
+                            <div class="column-label">Expected Dates (${result.expected_count || 0})</div>
+                            <div class="date-list">${expectedDatesHtml}</div>
+                        </div>
+                        <div class="date-column predicted">
+                            <div class="column-label">Predicted Dates (${result.predicted_count || 0})</div>
+                            <div class="date-list">${predictedDatesHtml}</div>
+                        </div>
+                    </div>
+                    <div class="metrics">
+                        <div class="metric">
+                            <span class="metric-value">Precision:</span> ${(result.date_precision || 0).toFixed(3)}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">Recall:</span> ${(result.date_recall || 0).toFixed(3)}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">F1 Score:</span> ${(result.date_f1_score || 0).toFixed(3)}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">Exact Matches:</span> ${result.exact_matches || 0}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">Partial Matches:</span> ${result.partial_matches || 0}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">Year Matches:</span> ${result.year_matches || 0}
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(card);
+            });
+            
+            updateStats(filteredResults);
+        }
+        
+        function filterResults() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const matchFilter = document.getElementById('match-filter').value;
+            const promptFilter = document.getElementById('prompt-filter').value;
+            
+            // All results already have expected_count > 0 (filtered before HTML generation)
+            let filtered = results.filter(r => {
+                const matchesSearch = !searchTerm || 
+                    (r.note_id && r.note_id.toString().toLowerCase().includes(searchTerm)) ||
+                    (r.p_id && r.p_id.toString().toLowerCase().includes(searchTerm)) ||
+                    (r.prompt_type && r.prompt_type.toLowerCase().includes(searchTerm));
+                
+                const matchesMatchFilter = matchFilter === 'all' ||
+                    (matchFilter === 'exact' && r.date_match_type === 'exact') ||
+                    (matchFilter === 'partial' && r.date_match_type === 'partial') ||
+                    (matchFilter === 'year' && r.date_match_type === 'year') ||
+                    (matchFilter === 'none' && r.date_match_type === 'none');
+                
+                const matchesPromptFilter = promptFilter === 'all' || r.prompt_type === promptFilter;
+                
+                return matchesSearch && matchesMatchFilter && matchesPromptFilter;
+            });
+            
+            renderResults(filtered);
+        }
+        
+        document.getElementById('search-input').addEventListener('input', filterResults);
+        document.getElementById('match-filter').addEventListener('change', filterResults);
+        document.getElementById('prompt-filter').addEventListener('change', filterResults);
+        
+        // Initial render
+        renderResults(results);
+    </script>
+</body>
+</html>"""
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+
+def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
+    """
+    Generate an HTML comparison report with side-by-side view of expected vs predicted annotations.
+    
+    Args:
+        results_df: DataFrame with evaluation results
+        output_path: Path to save HTML file
+    """
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Evaluation Comparison Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .filters {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .filters input, .filters select {
+            margin: 5px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .result-card {
+            background-color: white;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .result-card.match {
+            border-left: 5px solid #27ae60;
+        }
+        .result-card.mismatch {
+            border-left: 5px solid #e74c3c;
+        }
+        .result-card.false-positive {
+            border-left: 5px solid #e67e22;
+            background-color: #fff5e6;
+        }
+        .result-card.partial {
+            border-left: 5px solid #f39c12;
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .result-id {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .match-badge {
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .match-badge.match {
+            background-color: #27ae60;
+            color: white;
+        }
+        .match-badge.mismatch {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .match-badge.false-positive {
+            background-color: #e67e22;
+            color: white;
+        }
+        .match-badge.partial {
+            background-color: #f39c12;
+            color: white;
+        }
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        .comparison-column {
+            padding: 10px;
+            border-radius: 3px;
+        }
+        .comparison-column.expected {
+            background-color: #ecf0f1;
+        }
+        .comparison-column.predicted {
+            background-color: #e8f5e9;
+        }
+        .comparison-column.original {
+            background-color: #fff3e0;
+        }
+        .column-label {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        .annotation-text {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .note-text-full {
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 3px;
+            border: 1px solid #dee2e6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .note-text-preview {
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 3px;
+            border: 1px solid #dee2e6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 13px;
+            line-height: 1.6;
+            max-height: 150px;
+            overflow: hidden;
+            position: relative;
+        }
+        .note-text-preview::after {
+            content: '...';
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(to right, transparent, #f8f9fa 50%);
+            padding-left: 20px;
+        }
+        .toggle-note-text {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .toggle-note-text:hover {
+            background-color: #2980b9;
+        }
+        .note-text-container {
+            margin-top: 10px;
+        }
+        .metrics {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        .metric {
+            padding: 5px 10px;
+            background-color: #ecf0f1;
+            border-radius: 3px;
+        }
+        .hidden {
+            display: none;
+        }
+        .stats {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-item {
+            display: inline-block;
+            margin: 10px;
+            padding: 10px 15px;
+            background-color: #ecf0f1;
+            border-radius: 3px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>LLM Evaluation Comparison Report</h1>
+        <p>Side-by-side comparison of expected vs predicted annotations</p>
+    </div>
+    
+    <div class="stats" id="stats">
+        <div class="stat-item">
+            <div class="stat-value" id="total-count">0</div>
+            <div class="stat-label">Total Evaluations</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="match-count">0</div>
+            <div class="stat-label">Matches</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="mismatch-count">0</div>
+            <div class="stat-label">Mismatches</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="false-positive-count">0</div>
+            <div class="stat-label">False Positives<br/>(Predicted when None Expected)</div>
+        </div>
+    </div>
+    
+    <div class="filters">
+        <input type="text" id="search-input" placeholder="Search by note_id, p_id, or prompt_type..." style="width: 300px;">
+        <select id="match-filter">
+            <option value="all">All Results</option>
+            <option value="match">Matches Only</option>
+            <option value="mismatch">Mismatches Only</option>
+            <option value="false-positive">False Positives Only</option>
+        </select>
+        <select id="prompt-filter">
+            <option value="all">All Prompt Types</option>
+        </select>
+    </div>
+    
+    <div id="results-container"></div>
+    
+    <script>
+        const results = """ + results_df.to_json(orient='records', force_ascii=False) + """;
+        
+        // Populate prompt filter
+        const promptTypes = [...new Set(results.map(r => r.prompt_type))].sort();
+        const promptFilter = document.getElementById('prompt-filter');
+        promptTypes.forEach(pt => {
+            const option = document.createElement('option');
+            option.value = pt;
+            option.textContent = pt;
+            promptFilter.appendChild(option);
+        });
+        
+        function updateStats(filteredResults) {
+            const total = filteredResults.length;
+            const matches = filteredResults.filter(r => r.overall_match).length;
+            const mismatches = total - matches;
+            
+            // Count false positives: LLM predicted something when no expected annotation
+            const falsePositives = filteredResults.filter(r => {
+                const hasExpected = r.expected_annotation && 
+                    r.expected_annotation.trim() !== '' && 
+                    r.expected_annotation !== '[NO EXPECTED ANNOTATION]';
+                const hasPredicted = r.predicted_annotation && 
+                    r.predicted_annotation.trim() !== '' && 
+                    r.predicted_annotation !== '[NO PREDICTION]';
+                return !hasExpected && hasPredicted;
+            }).length;
+            
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('match-count').textContent = matches;
+            document.getElementById('mismatch-count').textContent = mismatches;
+            document.getElementById('false-positive-count').textContent = falsePositives;
+        }
+        
+        function toggleNoteText(noteIdSafe) {
+            const fullText = document.getElementById('note-text-full-' + noteIdSafe);
+            const preview = document.getElementById('note-preview-' + noteIdSafe);
+            const btn = document.getElementById('toggle-btn-' + noteIdSafe);
+            
+            if (!fullText || !preview || !btn) return;
+            
+            if (fullText.style.display === 'none') {
+                fullText.style.display = 'block';
+                preview.style.display = 'none';
+                btn.textContent = 'Show Preview';
+            } else {
+                fullText.style.display = 'none';
+                preview.style.display = 'block';
+                btn.textContent = 'Show Full Text';
+            }
+        }
+        
+        function toggleFewshotNote(noteIdFewshot) {
+            const fullText = document.getElementById('fewshot-note-full-' + noteIdFewshot);
+            const preview = document.getElementById('fewshot-note-preview-' + noteIdFewshot);
+            const btn = document.getElementById('fewshot-toggle-btn-' + noteIdFewshot);
+            
+            if (!fullText || !preview || !btn) return;
+            
+            if (fullText.style.display === 'none') {
+                fullText.style.display = 'block';
+                preview.style.display = 'none';
+                btn.textContent = 'Show Preview';
+            } else {
+                fullText.style.display = 'none';
+                preview.style.display = 'block';
+                btn.textContent = 'Show Full Note';
+            }
+        }
+        
+        function renderResults(filteredResults) {
+            const container = document.getElementById('results-container');
+            container.innerHTML = '';
+            
+            filteredResults.forEach((result, index) => {
+                const card = document.createElement('div');
+                
+                // Check if this is a false positive
+                const hasExpected = result.expected_annotation && 
+                    result.expected_annotation.trim() !== '' && 
+                    result.expected_annotation !== '[NO EXPECTED ANNOTATION]';
+                const hasPredicted = result.predicted_annotation && 
+                    result.predicted_annotation.trim() !== '' && 
+                    result.predicted_annotation !== '[NO PREDICTION]';
+                const isFalsePositive = !hasExpected && hasPredicted;
+                
+                // Determine card class and match text
+                let matchClass, matchText;
+                if (result.overall_match) {
+                    matchClass = 'match';
+                    matchText = '✓ Match';
+                } else if (isFalsePositive) {
+                    matchClass = 'false-positive';
+                    matchText = '⚠ False Positive';
+                } else {
+                    matchClass = 'mismatch';
+                    matchText = '✗ Mismatch';
+                }
+                
+                card.className = 'result-card ' + matchClass;
+                
+                // Create unique ID for this note
+                const noteId = 'note-' + (result.note_id || '') + '-' + (result.prompt_type || '') + '-' + index;
+                const noteIdSafe = noteId.replace(/[^a-zA-Z0-9-]/g, '-');
+                
+                // Get full note text
+                const noteText = result.note_text || result.note_text_preview || '[NO TEXT]';
+                const noteTextEscaped = noteText.replace(/\\n/g, '<br>').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                
+                // Check if text is long enough to need truncation
+                const isLongText = noteText.length > 200;
+                const previewText = isLongText ? noteText.substring(0, 200) + '...' : noteText;
+                const previewTextEscaped = previewText.replace(/\\n/g, '<br>').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                
+                card.innerHTML = `
+                    <div class="result-header">
+                        <div class="result-id">
+                            Note: ${result.note_id || 'N/A'} | Patient: ${result.p_id || 'N/A'} | Prompt: ${result.prompt_type || 'N/A'}
+                        </div>
+                        <div class="match-badge ${matchClass}">${matchText}</div>
+                    </div>
+                    <div class="comparison-grid">
+                        <div class="comparison-column expected">
+                            <div class="column-label">Expected Annotation</div>
+                            <div class="annotation-text">${(result.expected_annotation || '[NO EXPECTED ANNOTATION]').replace(/\\n/g, '<br>')}</div>
+                        </div>
+                        <div class="comparison-column predicted">
+                            <div class="column-label">Predicted Annotation</div>
+                            <div class="annotation-text">${(result.predicted_annotation || '[NO PREDICTION]').replace(/\\n/g, '<br>')}</div>
+                        </div>
+                        <div class="comparison-column original">
+                            <div class="column-label">Original Note Text</div>
+                            <div class="note-text-container">
+                                <div class="note-text-full" id="note-text-full-${noteIdSafe}" style="display: ${isLongText ? 'none' : 'block'};">
+                                    ${noteTextEscaped}
+                                </div>
+                                ${isLongText ? `
+                                <div class="note-text-preview" id="note-preview-${noteIdSafe}" style="display: block;">
+                                    ${previewTextEscaped}
+                                </div>
+                                <button class="toggle-note-text" onclick="toggleNoteText('${noteIdSafe}')" id="toggle-btn-${noteIdSafe}">
+                                    Show Full Text
+                                </button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="metrics">
+                        <div class="metric">Similarity: ${(result.similarity_score || 0).toFixed(3)}</div>
+                        <div class="metric">Exact Match: ${result.exact_match ? 'Yes' : 'No'}</div>
+                        <div class="metric">Processing Time: ${(result.processing_time_seconds || 0).toFixed(2)}s</div>
+                        ${result.fewshots_used > 0 ? `<div class="metric">Few-shots: ${result.fewshots_used}</div>` : ''}
+                    </div>
+                    ${result.fewshot_examples && result.fewshot_examples.length > 0 ? `
+                    <div class="fewshot-section">
+                        <div class="fewshot-header">Few-Shot Examples Used (${result.fewshot_examples.length})</div>
+                        <div class="fewshot-container">
+                            ${result.fewshot_examples.map((example, idx) => {
+                                const noteText = (example.note || '').replace(/\\n/g, '<br>');
+                                const annotationText = (example.annotation || '').replace(/\\n/g, '<br>');
+                                const isLongNote = (example.note || '').length > 200;
+                                const notePreview = isLongNote ? (example.note || '').substring(0, 200) + '...' : (example.note || '');
+                                const notePreviewEscaped = notePreview.replace(/\\n/g, '<br>');
+                                const noteIdFewshot = 'fewshot-note-' + noteIdSafe + '-' + idx;
+                                
+                                return `
+                                <div class="fewshot-example">
+                                    <div class="fewshot-example-label">Example ${idx + 1}:</div>
+                                    <div class="fewshot-note">
+                                        <strong>Medical Note:</strong><br/>
+                                        <div class="note-text-full" id="fewshot-note-full-${noteIdFewshot}" style="display: ${isLongNote ? 'none' : 'block'};">
+                                            ${noteText}
+                                        </div>
+                                        ${isLongNote ? `
+                                        <div class="note-text-preview" id="fewshot-note-preview-${noteIdFewshot}" style="display: block;">
+                                            ${notePreviewEscaped}
+                                        </div>
+                                        <button class="fewshot-toggle" onclick="toggleFewshotNote('${noteIdFewshot}')" id="fewshot-toggle-btn-${noteIdFewshot}">
+                                            Show Full Note
+                                        </button>
+                                        ` : ''}
+                                    </div>
+                                    <div class="fewshot-annotation">
+                                        <strong>Annotation:</strong><br/>
+                                        ${annotationText}
+                                    </div>
+                                </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                    ` : ''}
+                `;
+                
+                container.appendChild(card);
+            });
+            
+            updateStats(filteredResults);
+        }
+        
+        function filterResults() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const matchFilter = document.getElementById('match-filter').value;
+            const promptFilter = document.getElementById('prompt-filter').value;
+            
+            let filtered = results.filter(r => {
+                const matchesSearch = !searchTerm || 
+                    (r.note_id && r.note_id.toString().toLowerCase().includes(searchTerm)) ||
+                    (r.p_id && r.p_id.toString().toLowerCase().includes(searchTerm)) ||
+                    (r.prompt_type && r.prompt_type.toLowerCase().includes(searchTerm));
+                
+                // Check if this is a false positive
+                const rHasExpected = r.expected_annotation && 
+                    r.expected_annotation.trim() !== '' && 
+                    r.expected_annotation !== '[NO EXPECTED ANNOTATION]';
+                const rHasPredicted = r.predicted_annotation && 
+                    r.predicted_annotation.trim() !== '' && 
+                    r.predicted_annotation !== '[NO PREDICTION]';
+                const rIsFalsePositive = !rHasExpected && rHasPredicted;
+                
+                const matchesMatchFilter = matchFilter === 'all' ||
+                    (matchFilter === 'match' && r.overall_match) ||
+                    (matchFilter === 'mismatch' && !r.overall_match && !rIsFalsePositive) ||
+                    (matchFilter === 'false-positive' && rIsFalsePositive);
+                
+                const matchesPromptFilter = promptFilter === 'all' || r.prompt_type === promptFilter;
+                
+                return matchesSearch && matchesMatchFilter && matchesPromptFilter;
+            });
+            
+            renderResults(filtered);
+        }
+        
+        document.getElementById('search-input').addEventListener('input', filterResults);
+        document.getElementById('match-filter').addEventListener('change', filterResults);
+        document.getElementById('prompt-filter').addEventListener('change', filterResults);
+        
+        // Initial render
+        renderResults(results);
+    </script>
+</body>
+</html>"""
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+
+
 def load_report_type_prompt_mapping(mapping_json_path: str | Path | None) -> Dict[str, List[str]]:
     """
     Load report type to prompt type mapping from JSON file.
     
     Args:
-        mapping_json_path: Path to report_type_prompt_mapping.json, or None to use default
+        mapping_json_path: Path to report_type_prompt_mapping.json, or None to disable filtering
     
     Returns:
-        Dictionary mapping report_type -> list of prompt types
+        Dictionary mapping report_type -> list of prompt types (empty dict if not provided or not found)
     """
     script_dir = Path(__file__).resolve().parent
     
+    # Only load if explicitly provided - don't use default
     if mapping_json_path is None:
-        mapping_json_path = script_dir / "report_type_prompt_mapping.json"
-    else:
-        mapping_json_path = Path(mapping_json_path)
+        return {}
+    
+    mapping_json_path = Path(mapping_json_path)
     
     if not mapping_json_path.exists():
         print(f"[WARN] Report type prompt mapping file not found: {mapping_json_path}")
@@ -446,6 +1372,11 @@ def main(
                 evaluation['report_type'] = report_type
                 evaluation['raw_output'] = raw_output
                 evaluation['fewshots_used'] = len(fewshot_examples)
+                # Store few-shot examples as list of dicts for JSON serialization
+                evaluation['fewshot_examples'] = [
+                    {'note': note, 'annotation': annotation}
+                    for note, annotation in fewshot_examples
+                ]
                 evaluation['note_text'] = note_text  # Include full note text for comparison
                 evaluation['note_text_preview'] = note_text[:200] + '...' if len(note_text) > 200 else note_text  # Preview for CSV
                 evaluation['expected_annotation'] = expected_annotation  # Already in evaluation but making explicit
@@ -455,6 +1386,9 @@ def main(
                 prompt_duration = time.time() - prompt_start_time
                 evaluation['processing_time_seconds'] = round(prompt_duration, 3)
                 prompt_timings.append(prompt_duration)
+                
+                # Add match indicator for CSV
+                evaluation['match_indicator'] = '✓' if evaluation['overall_match'] else '✗'
                 
                 results.append(evaluation)
                 
@@ -498,7 +1432,12 @@ def main(
                     'note_date': str(note_date) if note_date else "",
                     'p_id': str(p_id) if p_id else "",
                     'report_type': str(report_type) if report_type else "",
-                    'fewshots_used': 0
+                    'fewshots_used': 0,
+                    'fewshot_examples': [],
+                    'expected_annotation': error_expected,
+                    'predicted_annotation': '',
+                    'llm_output': '',
+                    'raw_output': ''
                 })
                 prompt_timings.append(prompt_duration)
         
@@ -534,6 +1473,7 @@ def main(
     
     # Ensure columns are in a logical order for comparison
     column_order = [
+        'match_indicator',  # Visual indicator first
         'note_id', 'p_id', 'note_date', 'report_type', 'prompt_type',
         'note_text_preview', 'note_text',  # Note text (preview + full)
         'expected_annotation', 'predicted_annotation', 'llm_output', 'raw_output',  # Annotations for comparison
@@ -552,6 +1492,11 @@ def main(
     results_df_csv.to_csv(detailed_csv_path, index=False, encoding='utf-8', sep=';')
     print(f"  Detailed results saved to: {detailed_csv_path}")
     print(f"    Includes note text and annotations for easy comparison")
+    
+    # Generate HTML comparison report
+    html_report_path = script_dir / "llm_evaluation_comparison.html"
+    generate_html_report(results_df_csv, html_report_path)
+    print(f"  HTML comparison report saved to: {html_report_path}")
     
     # Summary CSV (per prompt type)
     summary_rows = []
@@ -600,6 +1545,33 @@ def main(
     with open(json_report_path, 'w', encoding='utf-8') as f:
         json.dump(json_report, f, indent=2, ensure_ascii=False)
     print(f"  JSON report saved to: {json_report_path}")
+    
+    # Generate date evaluation report
+    print("\n[STEP 7] Evaluating date extraction...")
+    date_start = time.time()
+    date_df, date_stats = evaluate_dates(results_df)
+    
+    # Save date evaluation CSV
+    date_csv_path = script_dir / "llm_evaluation_dates.csv"
+    date_df.to_csv(date_csv_path, index=False, encoding='utf-8', sep=';')
+    print(f"  Date evaluation CSV saved to: {date_csv_path}")
+    
+    # Generate HTML report for date evaluation (only for rows with expected dates)
+    date_html_path = script_dir / "llm_evaluation_dates_comparison.html"
+    # Filter to only show rows where dates were expected
+    date_df_with_dates = date_df[date_df['expected_count'] > 0].copy()
+    generate_date_html_report(date_df_with_dates, date_stats, date_html_path)
+    print(f"  Date evaluation HTML report saved to: {date_html_path}")
+    print(f"    Showing {len(date_df_with_dates)} evaluations with expected dates (out of {len(date_df)} total)")
+    
+    # Add date statistics to JSON report
+    json_report['date_evaluation'] = date_stats
+    with open(json_report_path, 'w', encoding='utf-8') as f:
+        json.dump(json_report, f, indent=2, ensure_ascii=False)
+    
+    date_duration = time.time() - date_start
+    print(f"  [Time: {date_duration:.2f}s]")
+    print(f"  Date accuracy: {date_stats['overall_date_accuracy']*100:.1f}% ({date_stats['rows_with_exact_match']}/{date_stats['rows_with_expected_dates']} rows with dates matched)")
     
     # Print summary
     print("\n" + "=" * 80)

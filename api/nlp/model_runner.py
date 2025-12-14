@@ -12,10 +12,19 @@ except ImportError:
 
 from llama_cpp import Llama
 
+# Try to import VLLM runner (optional)
+try:
+    from vllm_runner import init_model_vllm, is_vllm_available, run_model_with_prompt_vllm, load_vllm_config
+    VLLM_AVAILABLE = True
+except ImportError:
+    VLLM_AVAILABLE = False
+    print("[INFO] VLLM runner not available (optional dependency)")
+
 
 # ---------- Global state (kept hot in production) ----------
 _LLM: Optional[Llama] = None
 _PROMPTS: Dict[str, Dict] = {}
+_USE_VLLM: bool = False
 
 
 # ---------- 1) Prompt loading & building ----------
@@ -103,12 +112,33 @@ def _pick_n_gpu_layers(model_layers: int = 32) -> int:
 
 def init_model(model_path: str,
                n_ctx: int = 8192,  # Increased from 4096 to use more VRAM and handle longer prompts
-               model_layers: int = 32) -> None:
+               model_layers: int = 32,
+               vllm_config_path: Optional[Path] = None) -> None:
     """
     Initialize a global Llama() instance once (keep it hot).
-    Tries GPU offload first, falls back to CPU.
+    Tries VLLM first if configured, then llama.cpp with GPU offload, falls back to CPU.
+    
+    Args:
+        model_path: Path to model file (for llama.cpp fallback)
+        n_ctx: Context window size
+        model_layers: Number of model layers
+        vllm_config_path: Optional path to VLLM config file
     """
-    global _LLM
+    global _LLM, _USE_VLLM
+    
+    # Try VLLM first if available
+    if VLLM_AVAILABLE:
+        script_dir = Path(__file__).resolve().parent
+        if vllm_config_path is None:
+            vllm_config_path = script_dir / "vllm_config.json"
+        
+        if init_model_vllm(vllm_config_path):
+            _USE_VLLM = True
+            print("[model_runner] Using VLLM backend")
+            return
+    
+    # Fall back to llama.cpp
+    _USE_VLLM = False
     if _LLM is not None:
         return  # already initialized
 
@@ -182,8 +212,24 @@ def run_model_with_prompt(prompt: str,
                           temperature: float = 0.1) -> Dict[str, str]:
     """
     Run the (already-initialized) LLM on a ready-to-go prompt string.
+    Routes to VLLM if available, otherwise uses llama.cpp.
     Returns {"raw": full_text, "normalized": first_line_after_response}.
     """
+    global _USE_VLLM
+    
+    # Route to VLLM if available and initialized
+    if _USE_VLLM and VLLM_AVAILABLE and is_vllm_available():
+        try:
+            return run_model_with_prompt_vllm(
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature
+            )
+        except Exception as e:
+            print(f"[WARN] VLLM request failed: {e}, falling back to llama.cpp")
+            _USE_VLLM = False
+    
+    # Fall back to llama.cpp
     if _LLM is None:
         raise RuntimeError(
             "Model not initialized. Call init_model(...) first.")

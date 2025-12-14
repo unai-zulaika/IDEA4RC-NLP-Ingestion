@@ -53,6 +53,7 @@ import json
 from typing import Dict, List
 
 from nlp.model_runner import get_prompt, init_model, load_prompts_from_json, run_model_with_prompt
+import nlp.model_runner as model_runner_module
 from nlp.processing_utils import (
     first_group as _first_group,
     is_duplicate_row as _is_duplicate_row,
@@ -79,7 +80,8 @@ def process_texts_with_llm(
     fewshots_dict: Dict[str, List[tuple]] = None,
     parse_multiple_values: bool = True,
     task_id: str = None,
-    is_cancelled_callback=None
+    is_cancelled_callback=None,
+    report_type_mapping: Dict[str, List[str]] | None = None
 ) -> pandas.DataFrame:
     """
     Process texts row by row using the LLM for each prompt type.
@@ -96,6 +98,9 @@ def process_texts_with_llm(
                                       Each value will create a separate row in the output.
         task_id (str): Optional task ID for cancellation checking
         is_cancelled_callback (callable): Optional callback function to check if task is cancelled
+        report_type_mapping (Dict[str, List[str]]): Optional mapping of report_type -> list of prompt types.
+                                                     If provided, only runs prompts relevant to each note's report_type.
+                                                     If None or empty, runs all prompts for all notes.
 
     Returns:
         pandas.DataFrame: DataFrame with columns: prompt_type, annotation, p_id, date, note_id, report_type, raw_output
@@ -115,18 +120,70 @@ def process_texts_with_llm(
 
     # Initialize model and load prompts
     print("[INFO] Loading prompts...")
-    load_prompts_from_json(prompts_json_path)
+    # Check if this is FBK_scripts/prompts.json (INT format) and adapt if needed
+    import json
+    try:
+        with open(prompts_json_path, "r", encoding="utf-8") as f:
+            prompts_data = json.load(f)
+        if 'INT' in prompts_data:
+            # This is an INT prompts file, need to adapt it
+            print("[INFO] Detected INT prompts format, adapting for model_runner...")
+            from nlp.prompt_adapter import adapt_int_prompts
+            adapted_prompts = adapt_int_prompts(prompts_json_path)
+            # Set the global _PROMPTS variable in model_runner module
+            # Use the module-level import to ensure we're modifying the same module instance
+            model_runner_module._PROMPTS = adapted_prompts
+            print(f"[INFO] Loaded {len(adapted_prompts)} adapted INT prompts")
+            # Verify it worked by checking the module's _PROMPTS
+            if len(model_runner_module._PROMPTS) == 0:
+                print(f"[ERROR] Failed to load prompts into model_runner._PROMPTS")
+            else:
+                print(f"[INFO] Verified {len(model_runner_module._PROMPTS)} prompts loaded successfully")
+        else:
+            # Regular format, use normal loader
+            load_prompts_from_json(prompts_json_path)
+    except Exception as e:
+        print(f"[WARN] Error checking prompts format: {e}, using default loader")
+        load_prompts_from_json(prompts_json_path)
 
     print("[INFO] Initializing model...")
     init_model(str(model_path))
 
     # Get all available prompt types
     import json
-    with open(prompts_json_path, "r", encoding="utf-8") as f:
-        prompts_config = json.load(f)
-
-    prompt_types = list(prompts_config.keys())
+    
+    # Check if we loaded adapted INT prompts by checking model_runner's _PROMPTS
+    # After loading, _PROMPTS should contain the prompts
+    if len(model_runner_module._PROMPTS) > 0:
+        # Use adapted prompts from model_runner
+        prompt_types = list(model_runner_module._PROMPTS.keys())
+    else:
+        # Use prompts from JSON file (fallback)
+        with open(prompts_json_path, "r", encoding="utf-8") as f:
+            prompts_config = json.load(f)
+        # Handle both regular format and INT format
+        if 'INT' in prompts_config:
+            # INT format - we should have already adapted it above
+            # But if we get here, something went wrong, so use INT prompts directly
+            prompt_types = list(prompts_config['INT'].keys())
+        else:
+            prompt_types = list(prompts_config.keys())
     print(f"[INFO] Found {len(prompt_types)} prompt types: {prompt_types}")
+    
+    # Check if report type filtering is enabled
+    use_report_type_filtering = report_type_mapping is not None and len(report_type_mapping) > 0
+    if use_report_type_filtering:
+        print(f"[INFO] Report type filtering: ENABLED ({len(report_type_mapping)} report types mapped)")
+        # Validate that mapped prompts exist in prompts.json
+        all_mapped_prompts = set()
+        for report_type, prompts in report_type_mapping.items():
+            all_mapped_prompts.update(prompts)
+        missing_prompts = all_mapped_prompts - set(prompt_types)
+        if missing_prompts:
+            print(f"[WARN] {len(missing_prompts)} prompt(s) in mapping don't exist in prompts.json: {sorted(missing_prompts)}")
+            print(f"[WARN] These prompts will be skipped during processing")
+    else:
+        print("[INFO] Report type filtering: DISABLED (running all prompts for all notes)")
 
     # Initialize fewshots if not provided
     if fewshots_dict is None:
@@ -151,10 +208,26 @@ def process_texts_with_llm(
         report_type = row.get("report_type", "")
 
         print(
-            f"[INFO] Processing row {idx + 1}/{total_rows} - Patient: {p_id}, Note: {note_id}")
+            f"[INFO] Processing row {idx + 1}/{total_rows} - Patient: {p_id}, Note: {note_id}, Report Type: {report_type}")
 
-        # Run model for each prompt type
-        for prompt_type in prompt_types:
+        # Determine which prompts to run for this note
+        if use_report_type_filtering:
+            allowed_prompts = report_type_mapping.get(report_type, prompt_types)
+            # Filter out prompts that don't exist in the actual prompts.json
+            allowed_prompts = [pt for pt in allowed_prompts if pt in prompt_types]
+            if len(allowed_prompts) < len(report_type_mapping.get(report_type, [])):
+                skipped = len(report_type_mapping.get(report_type, [])) - len(allowed_prompts)
+                print(f"  [WARN] Skipped {skipped} prompt(s) from mapping that don't exist in prompts.json")
+            if len(allowed_prompts) < len(prompt_types):
+                print(f"  [INFO] Filtered prompts: {len(allowed_prompts)}/{len(prompt_types)} prompts relevant to {report_type}")
+            if len(allowed_prompts) == 0:
+                print(f"  [WARN] No valid prompts found for report_type '{report_type}' - skipping this note")
+                continue
+        else:
+            allowed_prompts = prompt_types
+
+        # Run model for each allowed prompt type
+        for prompt_type in allowed_prompts:
             print(f"  - Running prompt type: {prompt_type}")
 
             # Get fewshots for this prompt type
@@ -536,24 +609,78 @@ def process_llm_annotations_with_regex(
         # Track if any pattern matched for this annotation
         annotation_matched = False
 
+        # Helper function to check if annotation_id is relevant to prompt_type
+        def is_annotation_relevant_to_prompt(annotation_id: str, annotation_data: Dict, prompt_type: str) -> bool:
+            """
+            Check if an annotation is relevant to the current prompt_type.
+            This prevents cross-prompt-type false matches.
+            """
+            # Patient status annotations (225, 226, 227, 228, 229) should only match patient-status-int
+            patient_status_ids = {"225", "226", "227", "228", "229", "230", "231"}
+            if annotation_id in patient_status_ids:
+                return prompt_type == "patient-status-int"
+            
+            # Add more specific mappings as needed
+            # For now, be more permissive for other annotations but stricter for patient status
+            return True
+
         # Apply regex patterns to the annotation text
         print(
-            f"[DEBUG] Checking against {len(summary_dict)} annotation patterns...")
+            f"[DEBUG] Checking against {len(summary_dict)} annotation patterns for prompt_type: {prompt_type}...")
 
         for annotation_id, annotation_data in summary_dict.items():
+            # Filter by prompt_type relevance
+            if not is_annotation_relevant_to_prompt(annotation_id, annotation_data, prompt_type):
+                continue
+            
             # Check if there are parameters defined
             if "parameters" not in annotation_data or not annotation_data["parameters"]:
                 # print(
                 #     f"[DEBUG]     No parameters defined, checking for content match...")
 
-                # No parameters - check for exact/partial match
+                # No parameters - check for exact/partial match with stricter criteria
                 sentence_content = annotation_data.get("sentence_content", "")
                 norm_content = sentence_content.lower().strip()
                 norm_annotation = annotation_text.lower().strip()
 
                 print(f"[DEBUG]     Expected content: '{sentence_content}'")
 
-                # Check for match
+                # Stricter matching: require the full sentence content to be present in annotation
+                # This prevents partial substring matches that cause false positives
+                # For patient status annotations, require exact or near-exact match
+                if annotation_id in {"225", "226", "227", "228", "229", "230", "231"}:
+                    # For patient status, require the key phrase to be present
+                    # Check for the distinctive part (e.g., "Dead of Disease", "Alive, No Evidence")
+                    key_phrases = {
+                        "225": ["dead of disease", "dod"],
+                        "226": ["dead of other cause", "doc"],
+                        "227": ["dead of unknown cause", "duc"],
+                        "228": ["alive, no evidence of disease", "ned"],
+                        "229": ["alive with disease", "awd", "localised"],
+                        "230": ["alive with disease", "awd", "nodes"],
+                        "231": ["alive with disease", "awd", "metastatic"]
+                    }
+                    phrases = key_phrases.get(annotation_id, [])
+                    if not phrases or not any(phrase in norm_annotation for phrase in phrases):
+                        continue
+                    # Also require "status" or "follow-up" to be present
+                    if "status" not in norm_annotation and "follow-up" not in norm_annotation and "followup" not in norm_annotation:
+                        continue
+                else:
+                    # For other parameterless annotations, use stricter matching
+                    # Require the sentence content to be a substantial part of the annotation
+                    # or the annotation to be contained in the sentence content
+                    if norm_content not in norm_annotation:
+                        # If sentence content not in annotation, check if it's a reasonable match
+                        # Require at least 50% of key words to match
+                        content_words = set(norm_content.split())
+                        annotation_words = set(norm_annotation.split())
+                        if len(content_words) > 0:
+                            overlap = len(content_words & annotation_words) / len(content_words)
+                            if overlap < 0.5:
+                                continue
+                
+                # Final check: original bidirectional match (but only if passed above filters)
                 if norm_content in norm_annotation or norm_annotation in norm_content:
                     print(
                         f"[INFO] ✓ Matched parameterless sentence {annotation_id}: {sentence_content}")
@@ -614,6 +741,10 @@ def process_llm_annotations_with_regex(
                 continue
 
             # Get the regex pattern for the current annotation
+            # Filter by prompt_type relevance for regex patterns too
+            if not is_annotation_relevant_to_prompt(annotation_id, summary_dict.get(annotation_id, {}), prompt_type):
+                continue
+            
             pattern = regexp_dict.get(annotation_id)
             # Skip if pattern is missing or blank (avoid empty-regex matching everywhere)
             if not pattern or not str(pattern).strip():
@@ -951,7 +1082,8 @@ def process_texts(
     prompts_json_path: str = None,
     fewshots_dict: Dict[str, List[tuple]] = None,
     task_id: str = None,
-    is_cancelled_callback=None
+    is_cancelled_callback=None,
+    report_type_mapping: Dict[str, List[str]] | None = None
 ) -> tuple[pandas.DataFrame, pandas.DataFrame]:
     """
     Main function to process texts using LLM and extract structured data.
@@ -990,7 +1122,8 @@ def process_texts(
         fewshots_dict=fewshots_dict,
         parse_multiple_values=True,
         task_id=task_id,
-        is_cancelled_callback=is_cancelled_callback
+        is_cancelled_callback=is_cancelled_callback,
+        report_type_mapping=report_type_mapping
     )
 
     print(f"[INFO] LLM generated {len(llm_results)} annotations")

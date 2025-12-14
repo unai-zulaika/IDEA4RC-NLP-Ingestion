@@ -9,6 +9,51 @@ import json
 import csv
 from pathlib import Path
 import re
+import unicodedata
+
+def clean_text(text):
+    """
+    Clean text by removing newlines and rare/control characters.
+    
+    Args:
+        text: Input text string
+    
+    Returns:
+        Cleaned text string
+    """
+    if not text:
+        return ''
+    
+    # Replace newlines and carriage returns with spaces
+    text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
+    
+    # Replace multiple consecutive spaces with a single space
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Remove control characters (except common whitespace)
+    # Keep printable characters and common whitespace
+    cleaned = []
+    for char in text:
+        # Keep printable characters, spaces, tabs
+        if unicodedata.category(char)[0] != 'C' or char in [' ', '\t']:
+            cleaned.append(char)
+        # Replace other control characters with space
+        elif unicodedata.category(char) == 'Cc':
+            cleaned.append(' ')
+    
+    text = ''.join(cleaned)
+    
+    # Normalize unicode (e.g., convert composed characters to decomposed or vice versa)
+    # This helps fix encoding issues like M-CM- sequences
+    text = unicodedata.normalize('NFKC', text)
+    
+    # Final cleanup: remove any remaining control characters and normalize whitespace
+    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)  # Remove remaining control chars
+    text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+    text = text.strip()  # Remove leading/trailing whitespace
+    
+    return text
+
 
 def convert_json_to_csv(json_file_path, output_csv_path):
     """
@@ -41,18 +86,18 @@ def convert_json_to_csv(json_file_path, output_csv_path):
     
     # Write to CSV with semicolon delimiter
     with open(output_csv_path, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.writer(f, delimiter=';')
+        writer = csv.writer(f, delimiter=';', quoting=csv.QUOTE_MINIMAL)
         
         # Write header
         writer.writerow(['text', 'date', 'p_id', 'note_id', 'report_type'])
         
         # Write each note as a row
         for note in notes:
-            text = note.get('text', '')
-            date = note.get('date', '')
-            p_id = note.get('p_id', '')
-            note_id = note.get('note_id', '')
-            report_type = note.get('report_type', '')
+            text = clean_text(note.get('text', ''))
+            date = clean_text(note.get('date', ''))
+            p_id = clean_text(str(note.get('p_id', '')))
+            note_id = clean_text(str(note.get('note_id', '')))
+            report_type = clean_text(note.get('report_type', ''))
             
             writer.writerow([text, date, p_id, note_id, report_type])
     
@@ -153,11 +198,11 @@ def map_notes_to_prompts(json_file_path, prompts_file_path, output_csv_path):
     
     # For each note, check each prompt type
     for note in notes:
-        note_id = note.get('note_id', '')
+        note_id = clean_text(str(note.get('note_id', '')))
         note_text = note.get('text', '')
-        date = note.get('date', '')
-        p_id = note.get('p_id', '')
-        report_type = note.get('report_type', '')
+        date = clean_text(note.get('date', ''))
+        p_id = clean_text(str(note.get('p_id', '')))
+        report_type = clean_text(note.get('report_type', ''))
         annotations = note.get('annotations', [])
         
         # For each prompt type, find matching annotations
@@ -166,12 +211,16 @@ def map_notes_to_prompts(json_file_path, prompts_file_path, output_csv_path):
             
             for annotation in annotations:
                 if map_annotation_to_prompt(annotation, prompt_key):
-                    matching_annotations.append(annotation)
+                    matching_annotations.append(clean_text(annotation))
             
             # Create a row for this note-prompt combination
             # If no matching annotation found, still create a row with empty annotation
             matching_annotation_text = ' | '.join(matching_annotations) if matching_annotations else ''
-            all_annotations_text = ' | '.join(annotations)
+            all_annotations_text = ' | '.join([clean_text(ann) for ann in annotations])
+            
+            # Clean and truncate note text preview
+            note_text_cleaned = clean_text(note_text)
+            note_text_preview = note_text_cleaned[:200] + '...' if len(note_text_cleaned) > 200 else note_text_cleaned
             
             rows.append({
                 'note_id': note_id,
@@ -181,7 +230,7 @@ def map_notes_to_prompts(json_file_path, prompts_file_path, output_csv_path):
                 'prompt_type': prompt_key,
                 'matching_annotation': matching_annotation_text,
                 'all_annotations': all_annotations_text,
-                'note_text_preview': note_text[:200] + '...' if len(note_text) > 200 else note_text
+                'note_text_preview': note_text_preview
             })
     
     # Write to CSV
