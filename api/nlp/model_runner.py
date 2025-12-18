@@ -3,7 +3,7 @@ import os
 import json
 import platform
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 
 try:
     import pynvml
@@ -209,11 +209,21 @@ def init_model(model_path: str,
 
 def run_model_with_prompt(prompt: str,
                           max_new_tokens: int = 128,
-                          temperature: float = 0.1) -> Dict[str, str]:
+                          temperature: float = 0.1,
+                          return_logprobs: bool = False) -> Dict[str, Any]:
     """
     Run the (already-initialized) LLM on a ready-to-go prompt string.
     Routes to VLLM if available, otherwise uses llama.cpp.
-    Returns {"raw": full_text, "normalized": first_line_after_response}.
+    Returns {"raw": full_text, "normalized": first_line_after_response, "logprobs": ...}.
+    
+    Args:
+        prompt: Input prompt
+        max_new_tokens: Maximum tokens to generate
+        temperature: Sampling temperature
+        return_logprobs: If True, request logprobs (VLLM only, ignored for llama.cpp)
+    
+    Returns:
+        Dictionary with 'raw', 'normalized', and optionally 'logprobs' (None for llama.cpp)
     """
     global _USE_VLLM
     
@@ -223,13 +233,14 @@ def run_model_with_prompt(prompt: str,
             return run_model_with_prompt_vllm(
                 prompt=prompt,
                 max_new_tokens=max_new_tokens,
-                temperature=temperature
+                temperature=temperature,
+                return_logprobs=return_logprobs
             )
         except Exception as e:
             print(f"[WARN] VLLM request failed: {e}, falling back to llama.cpp")
             _USE_VLLM = False
     
-    # Fall back to llama.cpp
+    # Fall back to llama.cpp (logprobs not supported)
     if _LLM is None:
         raise RuntimeError(
             "Model not initialized. Call init_model(...) first.")
@@ -249,4 +260,4 @@ def run_model_with_prompt(prompt: str,
     # If you prefer to split by "### Response:", do it here.
     first_line = raw.strip().splitlines()[0].strip()
 
-    return {"raw": raw, "normalized": first_line}
+    return {"raw": raw, "normalized": first_line, "logprobs": None}

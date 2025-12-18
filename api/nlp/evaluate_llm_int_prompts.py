@@ -25,6 +25,12 @@ from fewshot_builder import FewshotBuilder, map_annotation_to_prompt
 from evaluation_engine import evaluate_annotation, batch_evaluate
 from model_runner import init_model, run_model_with_prompt, get_prompt
 from date_evaluation import evaluate_dates
+from confidence_analyzer import (
+    calculate_confidence_from_logprobs,
+    should_reject_as_no_outcome,
+    get_confidence_metrics,
+    analyze_output_for_placeholders
+)
 
 # Import model_runner module to access _PROMPTS
 import model_runner as mr
@@ -729,6 +735,20 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
             background-color: #ecf0f1;
             border-radius: 3px;
         }
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .confidence-rejected {
+            background-color: #ffebee;
+            border-left: 3px solid #c62828;
+        }
+        .confidence-high {
+            background-color: #e8f5e9;
+        }
+        .confidence-low {
+            background-color: #fff3e0;
+        }
         .hidden {
             display: none;
         }
@@ -780,6 +800,54 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
             <div class="stat-value" id="false-positive-count">0</div>
             <div class="stat-label">False Positives<br/>(Predicted when None Expected)</div>
         </div>
+        <div class="stat-item">
+            <div class="stat-value" id="rejected-count">0</div>
+            <div class="stat-label">Rejected<br/>(Low Confidence)</div>
+        </div>
+    </div>
+    
+    <div class="stats" id="confidence-stats" style="display: none; margin-top: 20px;">
+        <h3 style="margin-bottom: 15px; color: #2c3e50;">Confidence Statistics</h3>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-total">0</div>
+            <div class="stat-label">With Confidence Data</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-avg">-</div>
+            <div class="stat-label">Avg Confidence</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-min">-</div>
+            <div class="stat-label">Min Confidence</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-max">-</div>
+            <div class="stat-label">Max Confidence</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-fp-avg">-</div>
+            <div class="stat-label">False Positives<br/>Avg Confidence</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-correct-avg">-</div>
+            <div class="stat-label">Correct Predictions<br/>Avg Confidence</div>
+        </div>
+    </div>
+    
+    <div class="stats" id="min-confidence-stats" style="display: none; margin-top: 20px;">
+        <h3 style="margin-bottom: 15px; color: #2c3e50;">Average Min Token Confidence by Category</h3>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-match-min-avg">-</div>
+            <div class="stat-label">Matches<br/>Avg Min Logprob</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-mismatch-min-avg">-</div>
+            <div class="stat-label">Mismatches<br/>Avg Min Logprob</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="conf-fp-min-avg">-</div>
+            <div class="stat-label">False Positives<br/>Avg Min Logprob</div>
+        </div>
     </div>
     
     <div class="filters">
@@ -795,10 +863,44 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
         </select>
     </div>
     
+    <div class="pagination-controls" id="pagination-controls" style="background-color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label for="page-size-select" style="font-weight: bold;">Results per page:</label>
+                <select id="page-size-select" style="padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+            </div>
+            <div id="results-info" style="color: #7f8c8d; font-weight: bold;">
+                Showing 0-0 of 0 results
+            </div>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <button id="pagination-prev" style="padding: 5px 15px; border: 1px solid #ddd; border-radius: 3px; background-color: #ecf0f1; cursor: pointer;" disabled>Previous</button>
+                <div id="pagination-pages" style="display: flex; gap: 5px; align-items: center;">
+                    <!-- Page numbers will be inserted here -->
+                </div>
+                <button id="pagination-next" style="padding: 5px 15px; border: 1px solid #ddd; border-radius: 3px; background-color: #ecf0f1; cursor: pointer;" disabled>Next</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <label for="jump-to-page" style="font-size: 12px;">Jump to:</label>
+                <input type="number" id="jump-to-page" min="1" value="1" style="width: 60px; padding: 5px; border: 1px solid #ddd; border-radius: 3px;">
+                <button id="jump-to-page-btn" style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 3px; background-color: #3498db; color: white; cursor: pointer;">Go</button>
+            </div>
+        </div>
+    </div>
+    
     <div id="results-container"></div>
     
     <script>
         const results = """ + results_df.to_json(orient='records', force_ascii=False) + """;
+        
+        // Pagination state
+        let currentPage = 0;
+        let pageSize = 50;
+        let totalPages = 0;
         
         // Populate prompt filter
         const promptTypes = [...new Set(results.map(r => r.prompt_type))].sort();
@@ -810,26 +912,129 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
             promptFilter.appendChild(option);
         });
         
+        function isFalsePositive(result) {
+            const hasExpected = result.expected_annotation && 
+                result.expected_annotation.trim() !== '' && 
+                result.expected_annotation !== '[NO EXPECTED ANNOTATION]';
+            const hasPredicted = result.predicted_annotation && 
+                result.predicted_annotation.trim() !== '' && 
+                result.predicted_annotation !== '[NO PREDICTION]';
+            return !hasExpected && hasPredicted;
+        }
+        
         function updateStats(filteredResults) {
             const total = filteredResults.length;
             const matches = filteredResults.filter(r => r.overall_match).length;
             const mismatches = total - matches;
             
             // Count false positives: LLM predicted something when no expected annotation
-            const falsePositives = filteredResults.filter(r => {
-                const hasExpected = r.expected_annotation && 
-                    r.expected_annotation.trim() !== '' && 
-                    r.expected_annotation !== '[NO EXPECTED ANNOTATION]';
-                const hasPredicted = r.predicted_annotation && 
-                    r.predicted_annotation.trim() !== '' && 
-                    r.predicted_annotation !== '[NO PREDICTION]';
-                return !hasExpected && hasPredicted;
-            }).length;
+            const falsePositives = filteredResults.filter(isFalsePositive).length;
+            
+            // Count rejected predictions
+            const rejected = filteredResults.filter(r => r.confidence_rejected).length;
             
             document.getElementById('total-count').textContent = total;
             document.getElementById('match-count').textContent = matches;
             document.getElementById('mismatch-count').textContent = mismatches;
             document.getElementById('false-positive-count').textContent = falsePositives;
+            document.getElementById('rejected-count').textContent = rejected;
+            
+            // Update confidence statistics
+            updateConfidenceStats(filteredResults);
+        }
+        
+        function updateConfidenceStats(filteredResults) {
+            // Filter results with confidence data
+            const withConfidence = filteredResults.filter(r => 
+                r.confidence_score !== null && r.confidence_score !== undefined
+            );
+            
+            if (withConfidence.length === 0) {
+                document.getElementById('confidence-stats').style.display = 'none';
+                return;
+            }
+            
+            document.getElementById('confidence-stats').style.display = 'block';
+            
+            // Calculate overall confidence statistics
+            const confScores = withConfidence.map(r => r.confidence_score);
+            const avgConf = confScores.reduce((a, b) => a + b, 0) / confScores.length;
+            const minConf = Math.min(...confScores);
+            const maxConf = Math.max(...confScores);
+            
+            document.getElementById('conf-total').textContent = withConfidence.length;
+            document.getElementById('conf-avg').textContent = avgConf.toFixed(3);
+            document.getElementById('conf-min').textContent = minConf.toFixed(3);
+            document.getElementById('conf-max').textContent = maxConf.toFixed(3);
+            
+            // Calculate false positives confidence
+            const falsePositives = withConfidence.filter(isFalsePositive);
+            if (falsePositives.length > 0) {
+                const fpScores = falsePositives.map(r => r.confidence_score);
+                const fpAvg = fpScores.reduce((a, b) => a + b, 0) / fpScores.length;
+                document.getElementById('conf-fp-avg').textContent = fpAvg.toFixed(3);
+            } else {
+                document.getElementById('conf-fp-avg').textContent = 'N/A';
+            }
+            
+            // Calculate correct predictions confidence
+            const correctPredictions = withConfidence.filter(r => r.overall_match);
+            if (correctPredictions.length > 0) {
+                const correctScores = correctPredictions.map(r => r.confidence_score);
+                const correctAvg = correctScores.reduce((a, b) => a + b, 0) / correctScores.length;
+                document.getElementById('conf-correct-avg').textContent = correctAvg.toFixed(3);
+            } else {
+                document.getElementById('conf-correct-avg').textContent = 'N/A';
+            }
+            
+            // Calculate average min logprob by category
+            updateMinLogprobStats(filteredResults);
+        }
+        
+        function updateMinLogprobStats(filteredResults) {
+            // Filter results with min logprob data
+            const withMinLogprob = filteredResults.filter(r => 
+                r.confidence_min_logprob !== null && r.confidence_min_logprob !== undefined
+            );
+            
+            if (withMinLogprob.length === 0) {
+                document.getElementById('min-confidence-stats').style.display = 'none';
+                return;
+            }
+            
+            document.getElementById('min-confidence-stats').style.display = 'block';
+            
+            // Separate into matches, mismatches, and false positives
+            const matches = withMinLogprob.filter(r => r.overall_match);
+            const mismatches = withMinLogprob.filter(r => !r.overall_match && !isFalsePositive(r));
+            const falsePositives = withMinLogprob.filter(isFalsePositive);
+            
+            // Calculate average min logprob for matches
+            if (matches.length > 0) {
+                const matchMinLogprobs = matches.map(r => r.confidence_min_logprob);
+                const matchMinAvg = matchMinLogprobs.reduce((a, b) => a + b, 0) / matchMinLogprobs.length;
+                document.getElementById('conf-match-min-avg').textContent = matchMinAvg.toFixed(3);
+            } else {
+                document.getElementById('conf-match-min-avg').textContent = 'N/A';
+            }
+            
+            // Calculate average min logprob for mismatches
+            if (mismatches.length > 0) {
+                const mismatchMinLogprobs = mismatches.map(r => r.confidence_min_logprob);
+                const mismatchMinAvg = mismatchMinLogprobs.reduce((a, b) => a + b, 0) / mismatchMinLogprobs.length;
+                document.getElementById('conf-mismatch-min-avg').textContent = mismatchMinAvg.toFixed(3);
+            } else {
+                document.getElementById('conf-mismatch-min-avg').textContent = 'N/A';
+            }
+            
+            // Calculate average min logprob for false positives
+            if (falsePositives.length > 0) {
+                const fpMinLogprobs = falsePositives.map(r => r.confidence_min_logprob);
+                const fpMinAvg = fpMinLogprobs.reduce((a, b) => a + b, 0) / fpMinLogprobs.length;
+                document.getElementById('conf-fp-min-avg').textContent = fpMinAvg.toFixed(3);
+            } else {
+                document.getElementById('conf-fp-min-avg').textContent = 'N/A';
+            }
         }
         
         function toggleNoteText(noteIdSafe) {
@@ -872,7 +1077,27 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
             const container = document.getElementById('results-container');
             container.innerHTML = '';
             
-            filteredResults.forEach((result, index) => {
+            // Calculate pagination
+            totalPages = Math.ceil(filteredResults.length / pageSize);
+            if (totalPages === 0) totalPages = 1;
+            
+            // Ensure currentPage is within valid range
+            if (currentPage >= totalPages) {
+                currentPage = Math.max(0, totalPages - 1);
+            }
+            
+            // Calculate slice indices
+            const startIndex = currentPage * pageSize;
+            const endIndex = Math.min(startIndex + pageSize, filteredResults.length);
+            const pageResults = filteredResults.slice(startIndex, endIndex);
+            
+            // Update pagination UI
+            updatePaginationUI(filteredResults.length, startIndex, endIndex);
+            
+            // Render only current page results
+            pageResults.forEach((result, index) => {
+                // Use original index from filteredResults for unique IDs
+                const originalIndex = startIndex + index;
                 const card = document.createElement('div');
                 
                 // Check if this is a false positive
@@ -900,7 +1125,7 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
                 card.className = 'result-card ' + matchClass;
                 
                 // Create unique ID for this note
-                const noteId = 'note-' + (result.note_id || '') + '-' + (result.prompt_type || '') + '-' + index;
+                const noteId = 'note-' + (result.note_id || '') + '-' + (result.prompt_type || '') + '-' + originalIndex;
                 const noteIdSafe = noteId.replace(/[^a-zA-Z0-9-]/g, '-');
                 
                 // Get full note text
@@ -950,7 +1175,34 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
                         <div class="metric">Exact Match: ${result.exact_match ? 'Yes' : 'No'}</div>
                         <div class="metric">Processing Time: ${(result.processing_time_seconds || 0).toFixed(2)}s</div>
                         ${result.fewshots_used > 0 ? `<div class="metric">Few-shots: ${result.fewshots_used}</div>` : ''}
+                        ${result.confidence_score !== null && result.confidence_score !== undefined ? `
+                            <div class="metric" style="background-color: ${result.confidence_rejected ? '#ffebee' : '#e8f5e9'};">
+                                Confidence: ${result.confidence_score.toFixed(3)}
+                                ${result.confidence_rejected ? ' <span style="color: #c62828; font-weight: bold;">(REJECTED)</span>' : ''}
+                            </div>
+                        ` : ''}
+                        ${result.confidence_avg_logprob !== null && result.confidence_avg_logprob !== undefined ? `
+                            <div class="metric">Avg Logprob: ${result.confidence_avg_logprob.toFixed(3)}</div>
+                        ` : ''}
+                        ${result.confidence_min_logprob !== null && result.confidence_min_logprob !== undefined ? `
+                            <div class="metric">Min Logprob: ${result.confidence_min_logprob.toFixed(3)}</div>
+                        ` : ''}
+                        ${result.confidence_max_logprob !== null && result.confidence_max_logprob !== undefined ? `
+                            <div class="metric">Max Logprob: ${result.confidence_max_logprob.toFixed(3)}</div>
+                        ` : ''}
+                        ${result.confidence_token_count > 0 ? `
+                            <div class="metric">Tokens: ${result.confidence_token_count}</div>
+                        ` : ''}
                     </div>
+                    ${result.confidence_rejected ? `
+                    <div style="background-color: #ffebee; padding: 10px; border-radius: 3px; margin-top: 10px; border-left: 4px solid #c62828;">
+                        <strong style="color: #c62828;">⚠ Prediction Rejected Due to Low Confidence</strong>
+                        <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                            Confidence score: ${result.confidence_score !== null && result.confidence_score !== undefined ? result.confidence_score.toFixed(3) : 'N/A'}<br/>
+                            ${result.original_llm_output ? `Original output: ${(result.original_llm_output || '').replace(/\\n/g, '<br>')}` : ''}
+                        </div>
+                    </div>
+                    ` : ''}
                     ${result.fewshot_examples && result.fewshot_examples.length > 0 ? `
                     <div class="fewshot-section">
                         <div class="fewshot-header">Few-Shot Examples Used (${result.fewshot_examples.length})</div>
@@ -1003,6 +1255,12 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
             const matchFilter = document.getElementById('match-filter').value;
             const promptFilter = document.getElementById('prompt-filter').value;
             
+            // Reset to page 1 when filters change (unless this is initial load)
+            const wasFiltered = document.getElementById('results-container').children.length > 0;
+            if (wasFiltered) {
+                currentPage = 0;
+            }
+            
             let filtered = results.filter(r => {
                 const matchesSearch = !searchTerm || 
                     (r.note_id && r.note_id.toString().toLowerCase().includes(searchTerm)) ||
@@ -1031,9 +1289,153 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
             renderResults(filtered);
         }
         
+        function updatePaginationUI(totalResults, startIndex, endIndex) {
+            const paginationControls = document.getElementById('pagination-controls');
+            const resultsInfo = document.getElementById('results-info');
+            const prevBtn = document.getElementById('pagination-prev');
+            const nextBtn = document.getElementById('pagination-next');
+            const pagesContainer = document.getElementById('pagination-pages');
+            const jumpToPageInput = document.getElementById('jump-to-page');
+            
+            // Show/hide pagination controls
+            if (totalResults === 0) {
+                paginationControls.style.display = 'none';
+                return;
+            }
+            paginationControls.style.display = 'block';
+            
+            // Update results info
+            resultsInfo.textContent = `Showing ${startIndex + 1}-${endIndex} of ${totalResults} results`;
+            
+            // Update prev/next buttons
+            prevBtn.disabled = currentPage === 0;
+            nextBtn.disabled = currentPage >= totalPages - 1;
+            
+            // Update jump to page input
+            jumpToPageInput.value = currentPage + 1;
+            jumpToPageInput.max = totalPages;
+            
+            // Generate page number buttons (show max 10 pages)
+            pagesContainer.innerHTML = '';
+            const maxPageButtons = 10;
+            let startPage = Math.max(0, currentPage - Math.floor(maxPageButtons / 2));
+            let endPage = Math.min(totalPages - 1, startPage + maxPageButtons - 1);
+            
+            // Adjust if we're near the end
+            if (endPage - startPage < maxPageButtons - 1) {
+                startPage = Math.max(0, endPage - maxPageButtons + 1);
+            }
+            
+            // Add first page button if not visible
+            if (startPage > 0) {
+                const firstBtn = document.createElement('button');
+                firstBtn.textContent = '1';
+                firstBtn.style.padding = '5px 10px';
+                firstBtn.style.border = '1px solid #ddd';
+                firstBtn.style.borderRadius = '3px';
+                firstBtn.style.backgroundColor = '#ecf0f1';
+                firstBtn.style.cursor = 'pointer';
+                firstBtn.onclick = () => goToPage(0);
+                pagesContainer.appendChild(firstBtn);
+                
+                if (startPage > 1) {
+                    const ellipsis = document.createElement('span');
+                    ellipsis.textContent = '...';
+                    ellipsis.style.padding = '0 5px';
+                    pagesContainer.appendChild(ellipsis);
+                }
+            }
+            
+            // Add page number buttons
+            for (let i = startPage; i <= endPage; i++) {
+                const pageBtn = document.createElement('button');
+                pageBtn.textContent = (i + 1).toString();
+                pageBtn.style.padding = '5px 10px';
+                pageBtn.style.border = '1px solid #ddd';
+                pageBtn.style.borderRadius = '3px';
+                pageBtn.style.cursor = 'pointer';
+                
+                if (i === currentPage) {
+                    pageBtn.style.backgroundColor = '#3498db';
+                    pageBtn.style.color = 'white';
+                    pageBtn.style.fontWeight = 'bold';
+                } else {
+                    pageBtn.style.backgroundColor = '#ecf0f1';
+                }
+                
+                pageBtn.onclick = () => goToPage(i);
+                pagesContainer.appendChild(pageBtn);
+            }
+            
+            // Add last page button if not visible
+            if (endPage < totalPages - 1) {
+                if (endPage < totalPages - 2) {
+                    const ellipsis = document.createElement('span');
+                    ellipsis.textContent = '...';
+                    ellipsis.style.padding = '0 5px';
+                    pagesContainer.appendChild(ellipsis);
+                }
+                
+                const lastBtn = document.createElement('button');
+                lastBtn.textContent = totalPages.toString();
+                lastBtn.style.padding = '5px 10px';
+                lastBtn.style.border = '1px solid #ddd';
+                lastBtn.style.borderRadius = '3px';
+                lastBtn.style.backgroundColor = '#ecf0f1';
+                lastBtn.style.cursor = 'pointer';
+                lastBtn.onclick = () => goToPage(totalPages - 1);
+                pagesContainer.appendChild(lastBtn);
+            }
+        }
+        
+        function goToPage(page) {
+            if (page >= 0 && page < totalPages) {
+                currentPage = page;
+                // Re-filter and re-render
+                filterResults();
+            }
+        }
+        
         document.getElementById('search-input').addEventListener('input', filterResults);
         document.getElementById('match-filter').addEventListener('change', filterResults);
         document.getElementById('prompt-filter').addEventListener('change', filterResults);
+        
+        // Pagination event handlers
+        document.getElementById('pagination-prev').addEventListener('click', () => {
+            if (currentPage > 0) {
+                currentPage--;
+                filterResults();
+            }
+        });
+        
+        document.getElementById('pagination-next').addEventListener('click', () => {
+            if (currentPage < totalPages - 1) {
+                currentPage++;
+                filterResults();
+            }
+        });
+        
+        document.getElementById('page-size-select').addEventListener('change', (e) => {
+            pageSize = parseInt(e.target.value);
+            currentPage = 0; // Reset to first page
+            filterResults();
+        });
+        
+        document.getElementById('jump-to-page-btn').addEventListener('click', () => {
+            const jumpInput = document.getElementById('jump-to-page');
+            const targetPage = parseInt(jumpInput.value) - 1; // Convert to 0-based
+            if (targetPage >= 0 && targetPage < totalPages) {
+                goToPage(targetPage);
+            } else {
+                alert(`Please enter a page number between 1 and ${totalPages}`);
+            }
+        });
+        
+        document.getElementById('jump-to-page').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('jump-to-page-btn').click();
+            }
+        });
         
         // Initial render
         renderResults(results);
@@ -1043,6 +1445,49 @@ def generate_html_report(results_df: pd.DataFrame, output_path: Path) -> None:
     
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html_content)
+
+
+def load_confidence_config(config_path: str | Path | None) -> Dict:
+    """
+    Load confidence threshold configuration from JSON file.
+    
+    Args:
+        config_path: Path to confidence_config.json, or None to use defaults
+    
+    Returns:
+        Dictionary with confidence configuration
+    """
+    default_config = {
+        "enabled": False,
+        "default_threshold": -2.0,
+        "prompt_type_thresholds": {},
+        "logprobs_mode": "raw_logprobs"
+    }
+    
+    if config_path is None:
+        return default_config
+    
+    config_path = Path(config_path)
+    
+    if not config_path.exists():
+        print(f"[WARN] Confidence config file not found: {config_path}")
+        print(f"[WARN] Using default threshold: {default_config['default_threshold']}")
+        return default_config
+    
+    print(f"[INFO] Loading confidence config from: {config_path}")
+    
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        # Merge with defaults
+        default_config.update(config)
+        print(f"[INFO] Loaded confidence config: default_threshold={default_config['default_threshold']}, "
+              f"{len(default_config.get('prompt_type_thresholds', {}))} prompt-specific thresholds")
+        return default_config
+    except Exception as e:
+        print(f"[WARN] Failed to load confidence config: {e}, using defaults")
+        return default_config
 
 
 def load_report_type_prompt_mapping(mapping_json_path: str | Path | None) -> Dict[str, List[str]]:
@@ -1087,7 +1532,10 @@ def main(
     fewshot_k: int = 5,
     use_fewshots: bool = True,
     force_rebuild_faiss: bool = False,
-    report_type_mapping_path: str | Path = None  # Path to report_type_prompt_mapping.json
+    report_type_mapping_path: str | Path = None,  # Path to report_type_prompt_mapping.json
+    use_confidence_threshold: bool = False,  # Enable confidence-based filtering
+    confidence_threshold: float = -2.0,  # Logprob threshold (lower = more strict)
+    confidence_config_path: str | Path = None  # Path to confidence_config.json for per-prompt thresholds
 ):
     """
     Main evaluation pipeline.
@@ -1106,6 +1554,9 @@ def main(
         force_rebuild_faiss: Force rebuild FAISS indexes even if they exist
         report_type_mapping_path: Path to report_type_prompt_mapping.json. If None, uses default.
                                   If mapping is provided, only runs prompts relevant to each note's report_type.
+        use_confidence_threshold: If True, use logprobs to filter low-confidence predictions (VLLM only)
+        confidence_threshold: Logprob threshold for rejecting predictions (default: -2.0)
+        confidence_config_path: Path to confidence_config.json with per-prompt-type thresholds
     """
     script_dir = Path(__file__).resolve().parent
     
@@ -1132,6 +1583,12 @@ def main(
     report_type_mapping = load_report_type_prompt_mapping(report_type_mapping_path)
     use_report_type_filtering = len(report_type_mapping) > 0
     
+    # Load confidence configuration (if provided)
+    confidence_config = load_confidence_config(confidence_config_path)
+    use_confidence = use_confidence_threshold and confidence_config.get("enabled", True)
+    default_confidence_threshold = confidence_config.get("default_threshold", confidence_threshold)
+    prompt_type_thresholds = confidence_config.get("prompt_type_thresholds", {})
+    
     print("=" * 80)
     print("LLM Evaluation Pipeline for INT Prompts")
     print("=" * 80)
@@ -1143,6 +1600,12 @@ def main(
         print(f"Report type filtering: ENABLED ({len(report_type_mapping)} report types mapped)")
     else:
         print("Report type filtering: DISABLED (running all prompts for all notes)")
+    if use_confidence:
+        print(f"Confidence thresholding: ENABLED (default threshold: {default_confidence_threshold})")
+        if prompt_type_thresholds:
+            print(f"  Using {len(prompt_type_thresholds)} prompt-specific thresholds")
+    else:
+        print("Confidence thresholding: DISABLED")
     print("=" * 80)
     
     # Start overall timer
@@ -1337,14 +1800,18 @@ def main(
                 print(f"    {'-' * 70}")
                 
                 # Run LLM (optimized for speed)
+                # Request logprobs if confidence thresholding is enabled
+                return_logprobs = use_confidence
                 output = run_model_with_prompt(
                     prompt=prompt,
                     max_new_tokens=max_new_tokens,  # Reduced for speed
-                    temperature=0.1
+                    temperature=0.1,
+                    return_logprobs=return_logprobs
                 )
                 
                 llm_output = output["normalized"]
                 raw_output = output["raw"]
+                logprobs_data = output.get("logprobs")
                 
                 # Clean annotation: remove "Annotation: " prefix if present
                 import re
@@ -1357,6 +1824,52 @@ def main(
                 if llm_output:
                     llm_output = re.sub(
                         r'^\s*annotation\s*:\s*', '', llm_output, flags=re.IGNORECASE).strip()
+                
+                # Confidence analysis and thresholding (VLLM only)
+                confidence_score = None
+                confidence_rejected = False
+                confidence_metrics = None
+                original_llm_output = llm_output  # Keep original for comparison
+                
+                if use_confidence and logprobs_data is not None:
+                    # Calculate confidence from logprobs
+                    confidence_score = calculate_confidence_from_logprobs(
+                        logprobs_data, 
+                        prompt_type=prompt_type,
+                        method="average"
+                    )
+                    
+                    # Get confidence metrics
+                    confidence_metrics = get_confidence_metrics(logprobs_data)
+                    
+                    # Get threshold for this prompt type (or use default)
+                    threshold = prompt_type_thresholds.get(prompt_type, default_confidence_threshold)
+                    
+                    # Check if should reject based on confidence
+                    if confidence_score is not None:
+                        confidence_rejected = should_reject_as_no_outcome(
+                            confidence_score,
+                            threshold,
+                            prompt_type=prompt_type,
+                            use_normalized=False
+                        )
+                        
+                        # Also check for placeholder patterns in output
+                        has_placeholders = analyze_output_for_placeholders(llm_output)
+                        
+                        # Reject if confidence is low AND output has placeholders/unknown patterns
+                        if confidence_rejected and has_placeholders:
+                            llm_output = ""  # Convert to empty string (no outcome)
+                            print(f"    [CONFIDENCE] Rejected prediction (confidence: {confidence_score:.3f} < threshold: {threshold:.3f})")
+                        elif confidence_rejected:
+                            # Low confidence but no placeholders - log but don't reject
+                            print(f"    [CONFIDENCE] Low confidence ({confidence_score:.3f}) but no placeholders, keeping prediction")
+                            confidence_rejected = False
+                elif use_confidence and logprobs_data is None:
+                    # Confidence requested but not available (llama.cpp fallback)
+                    print(f"    [CONFIDENCE] Logprobs not available (using llama.cpp), skipping confidence analysis")
+                    # Debug: log when logprobs are expected but missing
+                    print(f"    [DEBUG] Confidence enabled but logprobs_data is None for prompt_type={prompt_type}")
                 
                 # Evaluate
                 evaluation = evaluate_annotation(
@@ -1381,6 +1894,21 @@ def main(
                 evaluation['note_text_preview'] = note_text[:200] + '...' if len(note_text) > 200 else note_text  # Preview for CSV
                 evaluation['expected_annotation'] = expected_annotation  # Already in evaluation but making explicit
                 evaluation['llm_output'] = llm_output  # Explicit LLM output (same as predicted_annotation but clearer naming)
+                evaluation['original_llm_output'] = original_llm_output  # Original output before confidence filtering
+                
+                # Add confidence metrics
+                evaluation['confidence_score'] = round(confidence_score, 4) if confidence_score is not None else None
+                evaluation['confidence_rejected'] = confidence_rejected
+                if confidence_metrics:
+                    evaluation['confidence_min_logprob'] = round(confidence_metrics.get('min_logprob', 0), 4) if confidence_metrics.get('min_logprob') is not None else None
+                    evaluation['confidence_max_logprob'] = round(confidence_metrics.get('max_logprob', 0), 4) if confidence_metrics.get('max_logprob') is not None else None
+                    evaluation['confidence_avg_logprob'] = round(confidence_metrics.get('avg_logprob', 0), 4) if confidence_metrics.get('avg_logprob') is not None else None
+                    evaluation['confidence_token_count'] = confidence_metrics.get('count', 0)
+                else:
+                    evaluation['confidence_min_logprob'] = None
+                    evaluation['confidence_max_logprob'] = None
+                    evaluation['confidence_avg_logprob'] = None
+                    evaluation['confidence_token_count'] = 0
                 
                 # Add timing
                 prompt_duration = time.time() - prompt_start_time
@@ -1437,7 +1965,14 @@ def main(
                     'expected_annotation': error_expected,
                     'predicted_annotation': '',
                     'llm_output': '',
-                    'raw_output': ''
+                    'raw_output': '',
+                    'original_llm_output': '',
+                    'confidence_score': None,
+                    'confidence_rejected': False,
+                    'confidence_min_logprob': None,
+                    'confidence_max_logprob': None,
+                    'confidence_avg_logprob': None,
+                    'confidence_token_count': 0
                 })
                 prompt_timings.append(prompt_duration)
         
@@ -1476,9 +2011,10 @@ def main(
         'match_indicator',  # Visual indicator first
         'note_id', 'p_id', 'note_date', 'report_type', 'prompt_type',
         'note_text_preview', 'note_text',  # Note text (preview + full)
-        'expected_annotation', 'predicted_annotation', 'llm_output', 'raw_output',  # Annotations for comparison
+        'expected_annotation', 'predicted_annotation', 'llm_output', 'original_llm_output', 'raw_output',  # Annotations for comparison
         'exact_match', 'similarity_score', 'overall_match',  # Match results
         'total_values', 'values_matched', 'value_match_rate', 'value_details',  # Value-level details
+        'confidence_score', 'confidence_rejected', 'confidence_avg_logprob', 'confidence_min_logprob', 'confidence_max_logprob', 'confidence_token_count',  # Confidence metrics
         'processing_time_seconds', 'fewshots_used'  # Metadata
     ]
     # Add any remaining columns not in the order list
@@ -1522,6 +2058,21 @@ def main(
     
     # JSON report
     overall_stats = batch_evaluate(results)
+    
+    # Calculate confidence statistics
+    confidence_scores = [r.get('confidence_score') for r in results if r.get('confidence_score') is not None]
+    confidence_rejected_count = sum(1 for r in results if r.get('confidence_rejected', False))
+    confidence_stats = None
+    if confidence_scores:
+        confidence_stats = {
+            'total_with_confidence': len(confidence_scores),
+            'average_confidence': round(sum(confidence_scores) / len(confidence_scores), 4),
+            'min_confidence': round(min(confidence_scores), 4),
+            'max_confidence': round(max(confidence_scores), 4),
+            'rejected_count': confidence_rejected_count,
+            'rejection_rate': round(confidence_rejected_count / len(confidence_scores), 4) if confidence_scores else 0.0
+        }
+    
     json_report = {
         'overall_statistics': overall_stats,
         'timing_statistics': {
@@ -1536,6 +2087,12 @@ def main(
             row['prompt_type']: {k: v for k, v in row.items() if k != 'prompt_type'}
             for row in summary_rows
         },
+        'confidence_statistics': confidence_stats,
+        'confidence_config': {
+            'enabled': use_confidence,
+            'default_threshold': default_confidence_threshold,
+            'prompt_type_thresholds': prompt_type_thresholds
+        } if use_confidence else None,
         'total_evaluations': len(results),
         'total_notes': len(notes_df),
         'total_prompt_types': len(prompt_types)
@@ -1584,6 +2141,14 @@ def main(
     print(f"Average similarity: {overall_stats['avg_similarity']:.3f}")
     if overall_stats['avg_value_match_rate'] is not None:
         print(f"Average value match rate: {overall_stats['avg_value_match_rate']*100:.1f}%")
+    if confidence_stats:
+        print("\n" + "-" * 80)
+        print("CONFIDENCE SUMMARY")
+        print("-" * 80)
+        print(f"Evaluations with confidence data: {confidence_stats['total_with_confidence']}")
+        print(f"Average confidence (logprob): {confidence_stats['average_confidence']:.3f}")
+        print(f"Confidence range: {confidence_stats['min_confidence']:.3f} to {confidence_stats['max_confidence']:.3f}")
+        print(f"Rejected predictions: {confidence_stats['rejected_count']} ({confidence_stats['rejection_rate']*100:.1f}%)")
     print("\n" + "-" * 80)
     print("TIMING SUMMARY")
     print("-" * 80)
@@ -1655,6 +2220,22 @@ if __name__ == "__main__":
         type=str,
         help="Path to report_type_prompt_mapping.json. If provided, only runs prompts relevant to each note's report_type."
     )
+    parser.add_argument(
+        "--use-confidence-threshold",
+        action="store_true",
+        help="Enable confidence-based filtering using VLLM logprobs (VLLM only, ignored for llama.cpp)"
+    )
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=-2.0,
+        help="Logprob threshold for rejecting low-confidence predictions (default: -2.0)"
+    )
+    parser.add_argument(
+        "--confidence-config",
+        type=str,
+        help="Path to confidence_config.json with per-prompt-type thresholds"
+    )
     
     args = parser.parse_args()
     
@@ -1668,6 +2249,9 @@ if __name__ == "__main__":
         fewshot_k=args.fewshot_k,
         use_fewshots=not args.no_fewshots,  # Invert: --no-fewshots means use_fewshots=False
         force_rebuild_faiss=args.force_rebuild_faiss,
-        report_type_mapping_path=args.report_type_mapping
+        report_type_mapping_path=args.report_type_mapping,
+        use_confidence_threshold=args.use_confidence_threshold,
+        confidence_threshold=args.confidence_threshold,
+        confidence_config_path=args.confidence_config
     )
 
