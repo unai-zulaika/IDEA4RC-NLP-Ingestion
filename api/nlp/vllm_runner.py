@@ -9,7 +9,7 @@ import os
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -79,7 +79,8 @@ class VLLMClient:
                  prompt: str,
                  max_new_tokens: int = 128,
                  temperature: float = 0.1,
-                 **kwargs) -> Dict[str, str]:
+                 logprobs: Optional[int] = None,
+                 **kwargs) -> Dict[str, Any]:
         """
         Generate text using VLLM server.
         
@@ -87,10 +88,11 @@ class VLLMClient:
             prompt: Input prompt
             max_new_tokens: Maximum tokens to generate
             temperature: Sampling temperature
+            logprobs: Number of logprobs to return per token (None to disable)
             **kwargs: Additional parameters
         
         Returns:
-            Dictionary with 'raw' and 'normalized' output
+            Dictionary with 'raw', 'normalized' output, and optionally 'logprobs'
         """
         url = f"{self.endpoint}/chat/completions"
         
@@ -111,6 +113,10 @@ class VLLMClient:
             **kwargs
         }
         
+        # Try with logprobs first if requested
+        if logprobs is not None:
+            payload["logprobs"] = logprobs
+        
         try:
             response = self.session.post(
                 url,
@@ -125,11 +131,105 @@ class VLLMClient:
             # Normalize: extract first line
             first_line = raw_output.strip().splitlines()[0].strip()
             
+            # Extract logprobs if available
+            # VLLM chat completions may return logprobs in different locations:
+            # 1. result["choices"][0]["logprobs"] (completions API)
+            # 2. result["choices"][0]["message"]["logprobs"] (chat completions API)
+            logprobs_data = None
+            if logprobs is not None:
+                choice = result["choices"][0]
+                
+                # Try multiple possible locations for logprobs
+                if "logprobs" in choice:
+                    logprobs_data = choice["logprobs"]
+                elif "message" in choice and isinstance(choice["message"], dict) and "logprobs" in choice["message"]:
+                    logprobs_data = choice["message"]["logprobs"]
+                
+                # Debug: log the response structure
+                if logprobs_data is None:
+                    print(f"    [DEBUG] Logprobs requested but not found. Choice keys: {list(choice.keys())}")
+                    if "message" in choice:
+                        print(f"    [DEBUG] Message keys: {list(choice['message'].keys()) if isinstance(choice['message'], dict) else 'not a dict'}")
+                elif isinstance(logprobs_data, dict):
+                    logprobs_keys = list(logprobs_data.keys())
+                    print(f"    [DEBUG] Logprobs dict keys: {logprobs_keys}")
+                    
+                    # Check for token_logprobs or content array
+                    if "token_logprobs" in logprobs_data:
+                        token_logprobs = logprobs_data.get("token_logprobs")
+                        if token_logprobs is None or len(token_logprobs) == 0:
+                            print(f"    [DEBUG] token_logprobs exists but is empty")
+                        else:
+                            print(f"    [DEBUG] Found {len(token_logprobs)} token logprobs")
+                    elif "content" in logprobs_data:
+                        # VLLM chat completions may return logprobs as content array
+                        content_logprobs = logprobs_data.get("content")
+                        if isinstance(content_logprobs, list) and len(content_logprobs) > 0:
+                            print(f"    [DEBUG] Found content array with {len(content_logprobs)} items")
+                            # Extract token_logprobs from content array
+                            # Each item might have "token", "logprob", "top_logprobs", etc.
+                            if isinstance(content_logprobs[0], dict):
+                                first_item_keys = list(content_logprobs[0].keys())
+                                print(f"    [DEBUG] First content item keys: {first_item_keys}")
+                                # Try to extract logprobs from content array
+                                extracted_logprobs = []
+                                for item in content_logprobs:
+                                    if isinstance(item, dict):
+                                        # Try different possible keys
+                                        if "logprob" in item:
+                                            extracted_logprobs.append(item["logprob"])
+                                        elif "token_logprob" in item:
+                                            extracted_logprobs.append(item["token_logprob"])
+                                
+                                if extracted_logprobs:
+                                    # Convert to expected format
+                                    logprobs_data = {"token_logprobs": extracted_logprobs}
+                                    print(f"    [DEBUG] Extracted {len(extracted_logprobs)} logprobs from content array")
+                                else:
+                                    print(f"    [DEBUG] Could not extract logprobs from content array")
+                    else:
+                        print(f"    [DEBUG] Logprobs dict does not contain 'token_logprobs' or 'content'")
+                else:
+                    print(f"    [DEBUG] Logprobs is not a dict: {type(logprobs_data)}")
+            
             return {
                 "raw": raw_output,
-                "normalized": first_line
+                "normalized": first_line,
+                "logprobs": logprobs_data
             }
         except requests.exceptions.RequestException as e:
+            # If logprobs was requested and we got a 400 error, retry without logprobs
+            if logprobs is not None and hasattr(e, 'response') and e.response is not None:
+                if e.response.status_code == 400:
+                    # Retry without logprobs
+                    payload_without_logprobs = payload.copy()
+                    payload_without_logprobs.pop("logprobs", None)
+                    
+                    try:
+                        response = self.session.post(
+                            url,
+                            json=payload_without_logprobs,
+                            timeout=self.timeout
+                        )
+                        response.raise_for_status()
+                        
+                        result = response.json()
+                        raw_output = result["choices"][0]["message"]["content"]
+                        first_line = raw_output.strip().splitlines()[0].strip()
+                        
+                        # Log that logprobs aren't supported
+                        print(f"    [WARN] VLLM server doesn't support logprobs parameter, continuing without confidence data")
+                        
+                        return {
+                            "raw": raw_output,
+                            "normalized": first_line,
+                            "logprobs": None  # Explicitly None to indicate not available
+                        }
+                    except requests.exceptions.RequestException as retry_error:
+                        # If retry also fails, raise original error
+                        raise RuntimeError(f"VLLM API request failed: {e}")
+            
+            # For other errors, raise as before
             raise RuntimeError(f"VLLM API request failed: {e}")
     
     def generate_batch(self,
@@ -273,7 +373,8 @@ def init_model_vllm(config_path: Optional[Path] = None) -> bool:
 
 def run_model_with_prompt_vllm(prompt: str,
                                max_new_tokens: int = 128,
-                               temperature: float = 0.1) -> Dict[str, str]:
+                               temperature: float = 0.1,
+                               return_logprobs: bool = False) -> Dict[str, Any]:
     """
     Run model with prompt using VLLM backend.
     
@@ -281,19 +382,23 @@ def run_model_with_prompt_vllm(prompt: str,
         prompt: Input prompt
         max_new_tokens: Maximum tokens to generate
         temperature: Sampling temperature
+        return_logprobs: If True, request logprobs from VLLM API
     
     Returns:
-        Dictionary with 'raw' and 'normalized' output
+        Dictionary with 'raw', 'normalized' output, and optionally 'logprobs'
     """
     global _VLLM_CLIENT
     
     if _VLLM_CLIENT is None:
         raise RuntimeError("VLLM client not initialized. Call init_model_vllm() first.")
     
+    logprobs_param = 1 if return_logprobs else None
+    
     return _VLLM_CLIENT.generate(
         prompt=prompt,
         max_new_tokens=max_new_tokens,
-        temperature=temperature
+        temperature=temperature,
+        logprobs=logprobs_param
     )
 
 
